@@ -1,0 +1,26 @@
+:root {
+  --bg: #F4F6F9;
+  --surface: #FFFFFF;
+  --ink: #0B1F3A;
+  --muted: #64748B;
+  --border: #E2E8F0;
+  --l1: #C97A2B;
+  --l2: #1B7A72;
+  --l3: #4A5FC1;
+  --danger: #C23B3B;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: 'IBM Plex Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.mono {
+  font-family: 'IBM Plex Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}

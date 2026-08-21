@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+paho-mqtt
+psycopg2-binary
+pyjwt
+bcrypt
+gspread
+google-auth
+resend
+openpyxl

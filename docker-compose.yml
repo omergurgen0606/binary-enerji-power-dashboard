@@ -1,0 +1,58 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - /etc/mosquitto/conf.d/default.conf:/mosquitto/config/mosquitto.conf:ro
+      - /etc/mosquitto/passwd:/etc/mosquitto/passwd:ro
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    networks:
+      - power_net
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    networks:
+      - power_net
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - mosquitto
+    environment:
+      DB_HOST: timescaledb
+      MQTT_BROKER: mosquitto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM: ${RESEND_FROM}
+      GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID}
+      GOOGLE_SERVICE_ACCOUNT_FILE: /app/google-service-account.json
+    volumes:
+      - /root/google-service-account.json:/app/google-service-account.json:ro
+    ports:
+      - "127.0.0.1:8000:8000"
+    networks:
+      - power_net
+
+networks:
+  power_net:
+
+volumes:
+  timescale_data:
+    external: true
+  mosquitto_data:
+  mosquitto_log:
