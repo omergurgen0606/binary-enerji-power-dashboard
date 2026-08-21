@@ -104,9 +104,12 @@ SITE_URL = "https://binaryenerji.com"
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    # auth Bearer-token oldugu icin (cookie degil) CORS zaten CSRF vektoru degildi,
+    # ama "*" gereksiz yere genisti -- gercek origin'lere daraltildi. localhost:5173
+    # yerel Vite dev server icin (bu API'ye karsi test ederken kullaniliyor).
+    allow_origins=[SITE_URL, "http://localhost:5173"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 main_loop = None  # asyncio event loop referansı, MQTT thread'inden erişmek için

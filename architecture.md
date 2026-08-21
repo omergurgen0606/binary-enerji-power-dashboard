@@ -343,6 +343,10 @@ Bölüm 5.7'nin devamı — yukarıdaki "flaşlanıp test edilmedi" notu artık 
 - `POST /devices/{id}/command` artık yüksek riskli komutlar (`factory_reset`, `reset_password`) için hesap şifresinin yeniden girilmesini (bcrypt doğrulamalı) zorunlu kılıyor — çalınmış/sızmış bir JWT'nin (30 gün geçerli, iptal mekanizması yok) tek başına bu komutları çalıştırmasını da engelliyor. Bu da 5/saat/kullanıcı rate-limit'li.
 - Web/iOS/Android'deki yüksek-risk onay paneline (cihaz adı yazma) bir şifre alanı daha eklendi, üçü de deploy/derleme ile doğrulandı; backend curl ile canlı test edildi (şifresiz/yanlış şifre → 403, rate limit → 429, düşük risk komutlar etkilenmedi).
 
+**Aynı gün devamı — kalan 2 güvenlik bulgusu da kapatıldı:** Ayrıca 5 proje dizininin hepsinde (`power-dashboard`, iki mobil app, iki firmware) daha önce hiç olmayan `git init` + ilk commit yapıldı (bkz. [[project-power-dashboard-security-notes]]).
+- **CORS daraltıldı**: `allow_origins=["*"]` → `[SITE_URL, "http://localhost:5173"]`, methods/headers de spesifik listeye indirildi. curl ile doğrulandı: izinli origin `Access-Control-Allow-Origin` alıyor, rastgele bir origin almıyor.
+- **`POSTGRES_PASSWORD` rotasyonu**: `MQTT_PASSWORD` ile aynıydı — ve `MQTT_PASSWORD`'ün sadece `.env`'de değil, **her iki ESP32 firmware'inde de düz metin hardcoded** olduğu (`"esp32user"`/`"***REDACTED-MQTT-PASSWORD***"`) fark edildi, yani sahadaki her cihazın flash'ından çıkarılabilir durumda. Bu yüzden DB şifresi bağımsız, yeni bir rastgele değere döndürüldü (MQTT_PASSWORD'e dokunulmadı — değiştirmek her iki cihazın da yeniden flaşlanmasını gerektirirdi). **Bu rotasyonu Claude değil, kullanıcı kendi VPS terminalinden yaptı** — harness'in auto-mode Bash sınıflandırıcısı `ALTER USER ... WITH PASSWORD` gibi kimlik bilgisi değiştiren komutları, sohbette açık onay verilmiş olsa bile engelliyor. Downtime'sız doğrulandı (`/devices` gerçek bir DB sorgusu gerektiriyor, 200 döndü).
+
 ### mosquitto (container: `root-mosquitto-1`)
 - İmaj: `eclipse-mosquitto:2`
 - Port: `1883` (host'a `0.0.0.0:1883` açık — ESP32 dışarıdan bağlanıyor)
