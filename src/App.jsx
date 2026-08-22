@@ -380,7 +380,7 @@ function Avatar({ url, username, size = 96 }) {
   );
 }
 
-function AccountPage({ token, onBack, onLogout }) {
+function AccountPage({ token, onBack, onLogout, deviceCount }) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -458,7 +458,14 @@ function AccountPage({ token, onBack, onLogout }) {
               <AccountField label="E-posta" value={profile.email || '—'} />
               <AccountField label="Telefon" value={profile.phone || '—'} />
               <AccountField label="Üyelik Tarihi" value={formatJoinDate(profile.created_at)} />
+              <AccountField label="E-posta Doğrulandı" value={profile.is_verified ? 'Evet' : 'Hayır'} />
+              <AccountField label="Bağlı Cihaz Sayısı" value={String(deviceCount ?? 0)} />
             </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
+              <PasswordChangeForm token={token} />
+            </div>
+
             <button onClick={onLogout} className="logout-link" style={{
               marginTop: 24, background: 'none', border: 'none', color: 'var(--muted)',
               fontSize: 12, cursor: 'pointer', textDecoration: 'underline', padding: 0,
@@ -469,6 +476,79 @@ function AccountPage({ token, onBack, onLogout }) {
         )}
       </div>
     </div>
+  );
+}
+
+function PasswordChangeForm({ token }) {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState(null); // { ok: bool, text: string } | null
+
+  const mismatch = confirmPassword.length > 0 && newPassword !== confirmPassword;
+  const canSubmit = currentPassword && newPassword.length >= 6 && newPassword === confirmPassword && !loading;
+
+  function submit(e) {
+    e.preventDefault();
+    if (!canSubmit) return;
+    setLoading(true);
+    setMessage(null);
+    axios.post(`${API_BASE}/me/password`, {
+      current_password: currentPassword,
+      new_password: newPassword,
+    }, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(() => {
+      setMessage({ ok: true, text: 'Şifreniz güncellendi.' });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    }).catch((err) => {
+      setMessage({ ok: false, text: err.response?.data?.detail || 'Şifre güncellenemedi.' });
+    }).finally(() => setLoading(false));
+  }
+
+  return (
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ fontSize: 13, fontWeight: 600 }}>Şifre Değiştir</div>
+      <input
+        type="password"
+        value={currentPassword}
+        onChange={(e) => setCurrentPassword(e.target.value)}
+        placeholder="Mevcut şifre"
+        style={inputStyle}
+      />
+      <input
+        type="password"
+        value={newPassword}
+        onChange={(e) => setNewPassword(e.target.value)}
+        placeholder="Yeni şifre (en az 6 karakter)"
+        style={inputStyle}
+      />
+      <input
+        type="password"
+        value={confirmPassword}
+        onChange={(e) => setConfirmPassword(e.target.value)}
+        placeholder="Yeni şifre (tekrar)"
+        style={inputStyle}
+      />
+      {mismatch && <div style={{ fontSize: 11, color: 'var(--danger)' }}>Şifreler eşleşmiyor.</div>}
+      {message && (
+        <div style={{ fontSize: 11, color: message.ok ? 'var(--l2)' : 'var(--danger)' }}>{message.text}</div>
+      )}
+      <button
+        type="submit"
+        disabled={!canSubmit}
+        style={{
+          padding: '9px 12px', borderRadius: 8, border: 'none',
+          background: 'var(--l3)', color: '#fff', fontSize: 13, fontWeight: 600,
+          cursor: canSubmit ? 'pointer' : 'default', opacity: canSubmit ? 1 : 0.5,
+        }}
+      >
+        {loading ? 'Güncelleniyor…' : 'Şifreyi Güncelle'}
+      </button>
+    </form>
   );
 }
 
@@ -1686,7 +1766,7 @@ export default function App() {
   if (showAccount) {
     return (
       <>
-        <AccountPage token={token} onBack={() => setShowAccount(false)} onLogout={handleLogout} />
+        <AccountPage token={token} onBack={() => setShowAccount(false)} onLogout={handleLogout} deviceCount={devices?.length} />
         <Footer />
       </>
     );
