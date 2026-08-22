@@ -259,7 +259,7 @@ def get_me(user: str = Depends(require_auth)):
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     cur.execute(
-        "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at "
+        "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at, is_verified "
         "FROM users WHERE username = %s",
         (user,),
     )
@@ -272,7 +272,33 @@ def get_me(user: str = Depends(require_auth)):
         "first_name": row[0], "last_name": row[1], "username": row[2], "email": row[3], "phone": row[4],
         "created_at": row[5].isoformat() if row[5] else None,
         "avatar_url": avatar_url_for(row[2], row[6]),
+        "is_verified": row[7],
     }
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+@app.post("/me/password")
+def change_password(payload: ChangePasswordRequest, user: str = Depends(require_auth)):
+    # Sifre brute-force'unu sinirlamak icin ayni rate limiter -- 5 deneme/saat/kullanici.
+    check_rate_limit(f"pwchange:{user}", max_attempts=5, window_seconds=60 * 60)
+    if len(payload.new_password) < 6:
+        raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
+    row = cur.fetchone()
+    if not row or not bcrypt.checkpw(payload.current_password.encode(), row[0].encode()):
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=403, detail="Mevcut şifre hatalı")
+    new_hash = bcrypt.hashpw(payload.new_password.encode(), bcrypt.gensalt()).decode()
+    cur.execute("UPDATE users SET password_hash = %s WHERE username = %s", (new_hash, user))
+    cur.close()
+    conn.close()
+    return {"message": "Şifre güncellendi"}
 
 ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
