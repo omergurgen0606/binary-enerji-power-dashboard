@@ -355,11 +355,145 @@ function AddDeviceForm({ token, compact, onAdded, onCancel }) {
   );
 }
 
-function DeviceList({ devices, onSelect, onLogout, token, onDeviceAdded }) {
+function formatJoinDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString('tr-TR', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function Avatar({ url, username, size = 96 }) {
+  const initial = (username || '?').charAt(0).toUpperCase();
+  return url ? (
+    <img
+      src={`${API_BASE}${url}`}
+      alt="Profil fotoğrafı"
+      style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', border: '1px solid var(--border)' }}
+    />
+  ) : (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', background: 'var(--l3)', color: '#fff',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.4, fontWeight: 700,
+    }}>
+      {initial}
+    </div>
+  );
+}
+
+function AccountPage({ token, onBack, onLogout }) {
+  const [profile, setProfile] = useState(null);
+  const [error, setError] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
+  const fileInputRef = useRef(null);
+
+  function fetchProfile() {
+    axios.get(`${API_BASE}/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => setProfile(res.data)).catch(() => setError('Hesap bilgileri yüklenemedi.'));
+  }
+
+  useEffect(fetchProfile, [token]);
+
+  function handleFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setUploading(true);
+    setUploadError('');
+    const form = new FormData();
+    form.append('file', file);
+    axios.post(`${API_BASE}/me/avatar`, form, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => {
+      setProfile((p) => ({ ...p, avatar_url: res.data.avatar_url }));
+    }).catch((err) => {
+      setUploadError(err.response?.data?.detail || 'Fotoğraf yüklenemedi.');
+    }).finally(() => setUploading(false));
+  }
+
+  const fullName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') || '—';
+
+  return (
+    <div className="centered-page" style={{ maxWidth: 420, padding: '0 24px' }}>
+      <button onClick={onBack} style={{
+        background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+        cursor: 'pointer', padding: 0, marginBottom: 16,
+      }}>
+        ← Cihazlarım
+      </button>
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 12, padding: 24,
+      }}>
+        {error && <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>}
+        {!error && !profile && <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>Yükleniyor…</div>}
+        {profile && (
+          <>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+              <Avatar url={profile.avatar_url} username={profile.username} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleFileChange}
+                style={{ display: 'none' }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                style={{
+                  background: 'none', border: 'none', color: 'var(--l3)', fontSize: 12,
+                  fontWeight: 600, cursor: uploading ? 'default' : 'pointer', padding: 0,
+                }}
+              >
+                {uploading ? 'Yükleniyor…' : 'Fotoğrafı Değiştir'}
+              </button>
+              {uploadError && <div style={{ fontSize: 11, color: 'var(--danger)' }}>{uploadError}</div>}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <AccountField label="Ad Soyad" value={fullName} />
+              <AccountField label="Kullanıcı Adı" value={profile.username} />
+              <AccountField label="E-posta" value={profile.email || '—'} />
+              <AccountField label="Telefon" value={profile.phone || '—'} />
+              <AccountField label="Üyelik Tarihi" value={formatJoinDate(profile.created_at)} />
+            </div>
+            <button onClick={onLogout} className="logout-link" style={{
+              marginTop: 24, background: 'none', border: 'none', color: 'var(--muted)',
+              fontSize: 12, cursor: 'pointer', textDecoration: 'underline', padding: 0,
+            }}>
+              Çıkış Yap
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function AccountField({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 500 }}>{value}</div>
+    </div>
+  );
+}
+
+function DeviceList({ devices, onSelect, onLogout, onOpenAccount, token, onDeviceAdded }) {
   const [showAddForm, setShowAddForm] = useState(devices.length === 0);
 
   return (
     <div className="centered-page" style={{ maxWidth: 420, padding: '0 24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -8 }}>
+        <button onClick={onOpenAccount} style={{
+          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+          cursor: 'pointer', padding: 4, textDecoration: 'underline',
+        }}>
+          Hesabım
+        </button>
+      </div>
       <img src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
       <div style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1, marginBottom: 4, textAlign: 'center' }}>BINARY ENERJİ</div>
       <h1 style={{ margin: '0 0 24px', fontSize: 22, fontWeight: 700, textAlign: 'center' }}>Cihazlarım</h1>
@@ -1507,6 +1641,7 @@ export default function App() {
   const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [devices, setDevices] = useState(null); // null = yükleniyor
   const [selectedDevice, setSelectedDevice] = useState(null);
+  const [showAccount, setShowAccount] = useState(false);
 
   function handleLogin(newToken) {
     localStorage.setItem('token', newToken);
@@ -1548,6 +1683,15 @@ export default function App() {
     return null;
   }
 
+  if (showAccount) {
+    return (
+      <>
+        <AccountPage token={token} onBack={() => setShowAccount(false)} onLogout={handleLogout} />
+        <Footer />
+      </>
+    );
+  }
+
   if (selectedDevice) {
     return (
       <>
@@ -1568,6 +1712,7 @@ export default function App() {
         devices={devices}
         onSelect={setSelectedDevice}
         onLogout={handleLogout}
+        onOpenAccount={() => setShowAccount(true)}
         token={token}
         onDeviceAdded={refreshDevices}
       />
