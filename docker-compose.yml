@@ -32,10 +32,12 @@ services:
       - mosquitto
     environment:
       DB_HOST: timescaledb
+      PYTHONUNBUFFERED: "1"
       MQTT_BROKER: mosquitto
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       MQTT_USER: ${MQTT_USER}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
+      DEVICE_CLAIM_SECRET: ${DEVICE_CLAIM_SECRET}
       JWT_SECRET: ${JWT_SECRET}
       RESEND_API_KEY: ${RESEND_API_KEY}
       RESEND_FROM: ${RESEND_FROM}
@@ -43,6 +45,7 @@ services:
       GOOGLE_SERVICE_ACCOUNT_FILE: /app/google-service-account.json
     volumes:
       - /root/google-service-account.json:/app/google-service-account.json:ro
+      - avatar_uploads:/app/uploads
     ports:
       - "127.0.0.1:8000:8000"
     networks:
@@ -56,3 +59,4 @@ volumes:
     external: true
   mosquitto_data:
   mosquitto_log:
+  avatar_uploads:

@@ -8,3 +8,5 @@ gspread
 google-auth
 resend
 openpyxl
+python-multipart
+Pillow

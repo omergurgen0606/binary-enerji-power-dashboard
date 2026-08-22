@@ -535,6 +535,27 @@ Bölüm 5.7'nin devamı — yukarıdaki "flaşlanıp test edilmedi" notu artık 
 - SMS ile doğrulama (şu an sadece e-posta) — ücretli bir SMS sağlayıcı (Netgsm, Twilio vb.) hesabı gerektirir, bilinçli olarak yapılmadı
 - Alarm eşikleri (gerilim/akım anormal değerlerde bildirim — e-posta/Telegram)
 
+### 5.9 Hesap Sayfası + Profil Fotoğrafı (22 Ağustos 2026)
+
+Kullanıcı, uygulama içinde hesap ikonuna tıklandığında ayrı bir sayfa açılmasını ve profil fotoğrafı yükleyebilmeyi istedi. Öncesinde web'de hesap sayfası hiç yoktu; iOS'ta `.sheet` (zaten sayfa gibi), Android'de ise sadece bir `AlertDialog` vardı (gerçek bir sayfa değildi) — üçü de salt-okunur, fotoğraf yok.
+
+**Backend (`api.py`) — sıfırdan yeni altyapı, bu depoda daha önce hiç dosya yükleme yoktu:**
+- `users` tablosuna `avatar_updated_at TIMESTAMPTZ` eklendi (migration, VPS'te uygulandı).
+- `python-multipart` + `Pillow` yeni bağımlılık (`requirements.txt`).
+- `POST /me/avatar`: JPEG/PNG/WEBP kabul ediyor (max 5MB), Pillow ile doğrulanıp merkezden kare kırpılıp 512x512'ye küçültülüyor, `{username}.jpg` olarak diske kaydediliyor.
+- `AVATAR_DIR=/app/uploads/avatars`, `app.mount("/avatars", StaticFiles(...))` ile **kimlik doğrulama gerektirmeden** servis ediliyor (hassas veri değil, `<img>`/`AsyncImage`/`Image` kullanımını basitleştiriyor). nginx `/api/` prefix'ini strip ettiği için dışarıdan `https://binaryenerji.com/api/avatars/{username}.jpg` olarak erişiliyor.
+- `docker-compose.yml`'e `avatar_uploads` adlı kalıcı volume eklendi (`/app/uploads`) — container rebuild'lerinde fotoğraflar kaybolmasın diye.
+- `GET /me` artık `created_at` (üyelik tarihi) ve `avatar_url` da döndürüyor.
+- Uçtan uca curl ile doğrulandı: yükleme, content-type reddi (resim olmayan dosya), statik servis, `GET /me`'nin güncellenmiş `avatar_url`'ü yansıtması.
+
+**Web (`src/App.jsx`):** Yeni `AccountPage` bileşeni, mevcut state-machine navigasyon desenine uyularak (`selectedDevice` ile aynı desen) `showAccount` state'iyle tam sayfa açılıyor. `DeviceList` header'ına "Hesabım" linki eklendi. Avatar dairesel gösteriliyor (yoksa kullanıcı adının ilk harfi ile renkli placeholder), "Fotoğrafı Değiştir" gizli `<input type=file>`'ı tetikliyor, seçilince hemen `multipart/form-data` ile yükleniyor. Tarayıcıda gerçek veriyle doğrulandı.
+
+**iOS (`ProfileView.swift`):** `PhotosUI.PhotosPicker` (iOS 16 uyumlu, ek izin gerektirmiyor) eklendi, seçilen fotoğraf JPEG'e çevrilip `APIClient.uploadAvatar` (elle inşa edilmiş multipart body, projede daha önce dosya yükleme yoktu) ile gönderiliyor. `AsyncImage` ile avatar gösteriliyor, üyelik tarihi eklendi. `BUILD SUCCEEDED`.
+
+**Android (`ProfileScreen.kt`):** `ProfileDialog` (AlertDialog) tamamen kaldırılıp `ProfileScreen` (Scaffold + TopAppBar + geri oku) olarak yeniden yazıldı — `DeviceListScreen`'de `selectedDevice` ile aynı tam-sayfa-değiştirme deseniyle açılıyor, artık gerçekten "ayrı bir sayfa". Sistem Foto Seçici'si (`ActivityResultContracts.PickVisualMedia`, API 33+ için ek izin gerekmiyor) kullanıldı; proje Coil gibi bir resim yükleme kütüphanesi kullanmadığı için avatar, mevcut OkHttp client'ıyla manuel `BitmapFactory.decodeByteArray` ile yükleniyor. `BUILD SUCCESSFUL`, emulator'de gerçek veriyle (yüklenen test fotoğrafı dahil) görsel olarak doğrulandı.
+
+**Not:** İki mobil platformda da fiziksel cihaz/emulator'da fotoğraf seçme akışının kendisi (Photo Picker/PhotosPicker UI'ının açılıp bir resim seçilmesi) interaktif olarak test edilmedi — backend'in kabul ettiği doğrulandı (curl), istemci kodları derlendi ve mevcut avatarların görüntülenmesi doğrulandı, ama "yeni bir fotoğraf seçip yükleme" adımının bizzat tıklanması kullanıcıya bırakıldı.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026

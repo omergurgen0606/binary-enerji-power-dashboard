@@ -15,12 +15,14 @@ import jwt
 import paho.mqtt.client as mqtt
 import psycopg2
 import resend
-from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from google.oauth2.service_account import Credentials
+from PIL import Image
 from pydantic import BaseModel
 
 DB_CONFIG = {
@@ -111,6 +113,12 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+# Kullanıcı profil fotoğrafları -- kimlik doğrulama gerektirmeyen, herkese açık
+# statik servis (basit <img>/AsyncImage kullanımı için, hassas veri içermiyor).
+AVATAR_DIR = os.environ.get("AVATAR_DIR", "/app/uploads/avatars")
+os.makedirs(AVATAR_DIR, exist_ok=True)
+app.mount("/avatars", StaticFiles(directory=AVATAR_DIR), name="avatars")
 
 main_loop = None  # asyncio event loop referansı, MQTT thread'inden erişmek için
 
@@ -241,17 +249,64 @@ def rename_device(device_id: str, payload: RenameDeviceRequest, user: str = Depe
     conn.close()
     return {"message": "Cihaz adı güncellendi"}
 
+def avatar_url_for(username: str, avatar_updated_at) -> str | None:
+    if not avatar_updated_at:
+        return None
+    return f"/avatars/{username}.jpg?v={int(avatar_updated_at.timestamp())}"
+
 @app.get("/me")
 def get_me(user: str = Depends(require_auth)):
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
-    cur.execute("SELECT first_name, last_name, username, email, phone FROM users WHERE username = %s", (user,))
+    cur.execute(
+        "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at "
+        "FROM users WHERE username = %s",
+        (user,),
+    )
     row = cur.fetchone()
     cur.close()
     conn.close()
     if not row:
         raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
-    return {"first_name": row[0], "last_name": row[1], "username": row[2], "email": row[3], "phone": row[4]}
+    return {
+        "first_name": row[0], "last_name": row[1], "username": row[2], "email": row[3], "phone": row[4],
+        "created_at": row[5].isoformat() if row[5] else None,
+        "avatar_url": avatar_url_for(row[2], row[6]),
+    }
+
+ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp"}
+MAX_AVATAR_BYTES = 5 * 1024 * 1024
+
+@app.post("/me/avatar")
+async def upload_avatar(file: UploadFile = File(...), user: str = Depends(require_auth)):
+    if file.content_type not in ALLOWED_AVATAR_TYPES:
+        raise HTTPException(status_code=400, detail="Sadece JPEG, PNG veya WEBP resim yükleyebilirsiniz")
+    contents = await file.read()
+    if len(contents) > MAX_AVATAR_BYTES:
+        raise HTTPException(status_code=400, detail="Resim en fazla 5 MB olabilir")
+    try:
+        img = Image.open(io.BytesIO(contents))
+        img.verify()
+        img = Image.open(io.BytesIO(contents))  # verify() sonrasi dosya tekrar acilmali
+        img = img.convert("RGB")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Geçersiz resim dosyası")
+
+    # Merkezden kare kirp, 512x512'ye kucult -- tum istemcilerde tutarli avatar boyutu.
+    w, h = img.size
+    side = min(w, h)
+    left, top = (w - side) // 2, (h - side) // 2
+    img = img.crop((left, top, left + side, top + side)).resize((512, 512), Image.LANCZOS)
+    img.save(os.path.join(AVATAR_DIR, f"{user}.jpg"), "JPEG", quality=85)
+
+    now = datetime.utcnow()
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET avatar_updated_at = %s WHERE username = %s", (now, user))
+    cur.close()
+    conn.close()
+    return {"avatar_url": avatar_url_for(user, now)}
 
 class LoginRequest(BaseModel):
     username: str
