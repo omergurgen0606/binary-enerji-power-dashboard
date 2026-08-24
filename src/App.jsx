@@ -12,6 +12,53 @@ const PHASES = [
   { key: '3', color: 'var(--l3)', label: 'L3' },
 ];
 
+const THEMES = [
+  { id: 'klasik', name: 'Klasik', desc: 'Mevcut görünüm', swatches: ['#F4F6F9', '#C97A2B', '#1B7A72', '#4A5FC1'] },
+  { id: 'olcu-cihazi', name: 'Ölçü Cihazı', desc: 'Koyu, teknik, enstrüman hissi', swatches: ['#0A0D10', '#E8A33D', '#4FD1C5', '#E8686B'] },
+  { id: 'kontrol-panosu', name: 'Kontrol Panosu', desc: 'Endüstriyel pano/şalter hissi', swatches: ['#1C2024', '#FFB020', '#3ECF8E', '#5B8DEF'] },
+  { id: 'marka-enerjisi', name: 'Marka Enerjisi', desc: 'Sıcak, davetkâr, markalı his', swatches: ['#F3F7F6', '#FF7A3D', '#0E4F4B', '#2DD4BF'] },
+  { id: 'enerji-atlasi', name: 'Enerji Atlası', desc: 'Faz başına renkli, yuvarlak, canlı', swatches: ['#FBFAFF', '#FF6B4A', '#16C784', '#6C5CE7'] },
+  { id: 'gundonumu', name: 'Gündönümü', desc: 'En sıcak ve cesur, gradyan vurgulu', swatches: ['#FFF7F0', '#FFB020', '#FF6B4A', '#E84393'] },
+];
+
+const THEME_STORAGE_KEY = 'theme';
+
+function ThemePicker({ theme, onChange }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 10 }}>
+      {THEMES.map((t) => {
+        const active = t.id === theme;
+        return (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => onChange(t.id)}
+            style={{
+              textAlign: 'left', cursor: 'pointer',
+              background: 'var(--surface)',
+              border: active ? '2px solid var(--accent)' : '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)',
+              padding: 12,
+              display: 'flex', flexDirection: 'column', gap: 8,
+            }}
+          >
+            <div style={{ display: 'flex', gap: 4 }}>
+              {t.swatches.map((c, i) => (
+                <span key={i} style={{ width: 16, height: 16, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.08)' }} />
+              ))}
+            </div>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)' }}>{t.name}</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>{t.desc}</div>
+            </div>
+            {active && <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)' }}>✓ Seçili</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function buildDecorativeWavePoints(cycleWidth, cycles, amplitude, baseline, phaseOffset = 0) {
   const pointsPerCycle = 24;
   const pts = [];
@@ -32,7 +79,7 @@ const WAVE_VIEW_WIDTH = WAVE_CYCLE_WIDTH * WAVE_CYCLES;
 
 const inputStyle = {
   // fontSize 16: iOS Safari, 16px'ten küçük input'lara odaklanınca sayfayı otomatik yakınlaştırıyor
-  padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 16, width: '100%',
+  padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)', fontSize: 16, width: '100%',
 };
 
 function AuthForm({ onLogin }) {
@@ -154,17 +201,17 @@ function AuthForm({ onLogin }) {
             <span style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1.5, fontWeight: 600 }}>BINARY ENERJİ</span>
           </div>
           <div style={{
-            background: 'var(--surface)', borderRadius: 16, padding: 28,
+            background: 'var(--surface)', borderRadius: "var(--radius-lg)", padding: 28,
             boxShadow: '0 20px 40px -12px rgba(11,31,58,0.18)',
           }}>
-            <div style={{ display: 'flex', marginBottom: 20, borderRadius: 8, background: 'var(--bg)', padding: 4 }}>
+            <div style={{ display: 'flex', marginBottom: 20, borderRadius: "var(--radius-sm)", background: 'var(--bg)', padding: 4 }}>
               {[['login', 'Giriş Yap'], ['register', 'Üye Ol']].map(([key, label]) => (
                 <button
                   key={key}
                   type="button"
                   onClick={() => switchMode(key)}
                   style={{
-                    flex: 1, padding: '8px 0', borderRadius: 6, border: 'none', cursor: 'pointer',
+                    flex: 1, padding: '8px 0', borderRadius: "var(--radius-xs)", border: 'none', cursor: 'pointer',
                     fontSize: 13, fontWeight: 600, transition: 'background 0.15s ease',
                     background: mode === key ? 'var(--surface)' : 'transparent',
                     color: mode === key ? 'var(--ink)' : 'var(--muted)',
@@ -258,7 +305,7 @@ function AuthForm({ onLogin }) {
               {notice && <div style={{ color: 'var(--l2)', fontSize: 13 }}>{notice}</div>}
               {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
               <button type="submit" disabled={loading} className="auth-submit-btn" style={{
-                padding: '11px 12px', borderRadius: 8, border: 'none',
+                padding: '11px 12px', borderRadius: "var(--radius-sm)", border: 'none',
                 background: 'var(--l3)', color: '#fff', fontSize: 14, fontWeight: 600,
                 cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.75 : 1,
               }}>
@@ -337,14 +384,14 @@ function AddDeviceForm({ token, compact, onAdded, onCancel }) {
       {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="submit" disabled={loading} style={{
-          flex: 1, padding: '10px 12px', borderRadius: 8, border: 'none',
+          flex: 1, padding: '10px 12px', borderRadius: "var(--radius-sm)", border: 'none',
           background: 'var(--l3)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
         }}>
           {loading ? 'Ekleniyor...' : 'Cihaz Ekle'}
         </button>
         {onCancel && (
           <button type="button" onClick={onCancel} style={{
-            padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+            padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
             background: 'none', color: 'var(--muted)', fontSize: 14, cursor: 'pointer',
           }}>
             Vazgeç
@@ -380,7 +427,7 @@ function Avatar({ url, username, size = 96 }) {
   );
 }
 
-function AccountPage({ token, onBack, onLogout, deviceCount }) {
+function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChange }) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -424,7 +471,7 @@ function AccountPage({ token, onBack, onLogout, deviceCount }) {
       </button>
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 24,
+        borderRadius: "var(--radius-md)", padding: 24,
       }}>
         {error && <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>}
         {!error && !profile && <div style={{ fontSize: 13, color: 'var(--muted)', textAlign: 'center' }}>Yükleniyor…</div>}
@@ -474,6 +521,17 @@ function AccountPage({ token, onBack, onLogout, deviceCount }) {
             </button>
           </>
         )}
+      </div>
+
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: "var(--radius-md)", padding: 24, marginTop: 16,
+      }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ink)', marginBottom: 4 }}>Görünüm</div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>
+          Panonun renk, yazı tipi ve şekil dilini değiştir.
+        </div>
+        <ThemePicker theme={theme} onChange={onThemeChange} />
       </div>
     </div>
   );
@@ -541,7 +599,7 @@ function PasswordChangeForm({ token }) {
         type="submit"
         disabled={!canSubmit}
         style={{
-          padding: '9px 12px', borderRadius: 8, border: 'none',
+          padding: '9px 12px', borderRadius: "var(--radius-sm)", border: 'none',
           background: 'var(--l3)', color: '#fff', fontSize: 13, fontWeight: 600,
           cursor: canSubmit ? 'pointer' : 'default', opacity: canSubmit ? 1 : 0.5,
         }}
@@ -579,7 +637,7 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, token, onDevic
       <h1 style={{ margin: '0 0 24px', fontSize: 22, fontWeight: 700, textAlign: 'center' }}>Cihazlarım</h1>
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 24,
+        borderRadius: "var(--radius-md)", padding: 24,
       }}>
         {devices.length === 0 && !showAddForm && (
           <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.5, textAlign: 'center', marginBottom: 16 }}>
@@ -595,7 +653,7 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, token, onDevic
                 className="device-row"
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '14px 16px', borderRadius: 8, border: '1px solid var(--border)',
+                  padding: '14px 16px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
                   background: 'var(--bg)', cursor: 'pointer', fontSize: 14, fontWeight: 600,
                   color: 'var(--ink)', textAlign: 'left',
                 }}
@@ -615,7 +673,7 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, token, onDevic
           />
         ) : (
           <button onClick={() => setShowAddForm(true)} className="add-device-btn" style={{
-            marginTop: devices.length > 0 ? 12 : 0, width: '100%', padding: '10px 12px', borderRadius: 8,
+            marginTop: devices.length > 0 ? 12 : 0, width: '100%', padding: '10px 12px', borderRadius: "var(--radius-sm)",
             border: '1px dashed var(--border)', background: 'none', color: 'var(--muted)',
             fontSize: 13, fontWeight: 600, cursor: 'pointer',
           }}>
@@ -647,7 +705,7 @@ function PhaseCard({ label, color, v, i, p, q, s, pf, thd, thvd, pulse }) {
     <div style={{
       background: 'var(--surface)',
       border: '1px solid var(--border)',
-      borderRadius: 12,
+      borderRadius: "var(--radius-md)",
       padding: '20px 24px',
       flex: 1,
       minWidth: 200,
@@ -706,7 +764,7 @@ function EnergyCard({ title, data, suffix, onClick }) {
       className={onClick ? 'dash-card' : undefined}
       style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: '20px 24px', flex: 1, minWidth: 220,
+        borderRadius: "var(--radius-md)", padding: '20px 24px', flex: 1, minWidth: 220,
         cursor: onClick ? 'pointer' : 'default',
       }}
     >
@@ -791,7 +849,7 @@ function HourlyEnergyModal({ token, device, title, suffix, onClose }) {
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          background: 'var(--surface)', borderRadius: 12, padding: 24,
+          background: 'var(--surface)', borderRadius: "var(--radius-md)", padding: 24,
           maxWidth: 760, width: '100%', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
         }}
       >
@@ -804,7 +862,7 @@ function HourlyEnergyModal({ token, device, title, suffix, onClose }) {
                 disabled={downloading}
                 className="add-device-btn"
                 style={{
-                  background: 'none', border: '1px solid var(--border)', borderRadius: 6,
+                  background: 'none', border: '1px solid var(--border)', borderRadius: "var(--radius-xs)",
                   color: 'var(--muted)', fontSize: 12, fontWeight: 600, cursor: downloading ? 'default' : 'pointer',
                   padding: '6px 10px',
                 }}
@@ -897,7 +955,7 @@ function WaveformCard({ label, color, v, i, cosPhi, q }) {
   return (
     <div style={{
       background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: 12, padding: '16px 20px', flex: 1, minWidth: 280, height: 260,
+      borderRadius: "var(--radius-md)", padding: '16px 20px', flex: 1, minWidth: 280, height: 260,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
@@ -940,7 +998,7 @@ function SectionCard({ title, right, children }) {
   return (
     <div style={{
       background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: 12, padding: 20, marginTop: 24,
+      borderRadius: "var(--radius-md)", padding: 20, marginTop: 24,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
@@ -957,14 +1015,14 @@ function fmt(v, digits = 1) {
 
 function TabToggle({ options, value, onChange }) {
   return (
-    <div style={{ display: 'flex', borderRadius: 8, background: 'var(--bg)', padding: 3 }}>
+    <div style={{ display: 'flex', borderRadius: "var(--radius-sm)", background: 'var(--bg)', padding: 3 }}>
       {options.map(([key, label]) => (
         <button
           key={key}
           type="button"
           onClick={() => onChange(key)}
           style={{
-            padding: '6px 14px', borderRadius: 6, border: 'none', cursor: 'pointer',
+            padding: '6px 14px', borderRadius: "var(--radius-xs)", border: 'none', cursor: 'pointer',
             fontSize: 12, fontWeight: 600, transition: 'background 0.15s ease',
             background: value === key ? 'var(--surface)' : 'transparent',
             color: value === key ? 'var(--ink)' : 'var(--muted)',
@@ -1266,7 +1324,7 @@ function CommandRow({ token, device, cmd, onDone }) {
 
   return (
     <div style={{
-      padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+      padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -1278,7 +1336,7 @@ function CommandRow({ token, device, cmd, onDone }) {
           disabled={loading}
           onClick={() => (highRisk ? setConfirmOpen((o) => !o) : send())}
           style={{
-            padding: '6px 14px', borderRadius: 6, border: highRisk ? '1px solid var(--danger)' : '1px solid var(--border)',
+            padding: '6px 14px', borderRadius: "var(--radius-xs)", border: highRisk ? '1px solid var(--danger)' : '1px solid var(--border)',
             background: highRisk ? 'none' : 'var(--bg)', color: highRisk ? 'var(--danger)' : 'var(--ink)',
             fontSize: 12, fontWeight: 600, cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
           }}
@@ -1287,7 +1345,7 @@ function CommandRow({ token, device, cmd, onDone }) {
         </button>
       </div>
       {highRisk && confirmOpen && (
-        <div style={{ background: 'var(--bg)', borderRadius: 6, padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ background: 'var(--bg)', borderRadius: "var(--radius-xs)", padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
           <span style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.5 }}>
             Bu işlem geri alınamaz. Onaylamak için cihazın adını (<strong>{device.name}</strong>) ve hesap şifrenizi aşağıya yazın.
           </span>
@@ -1310,7 +1368,7 @@ function CommandRow({ token, device, cmd, onDone }) {
             disabled={confirmText !== device.name || !password || loading}
             onClick={send}
             style={{
-              padding: '8px 12px', borderRadius: 6, border: 'none',
+              padding: '8px 12px', borderRadius: "var(--radius-xs)", border: 'none',
               background: 'var(--danger)', color: '#fff', fontSize: 12, fontWeight: 700,
               cursor: (confirmText !== device.name || !password || loading) ? 'default' : 'pointer',
               opacity: (confirmText !== device.name || !password || loading) ? 0.5 : 1,
@@ -1367,7 +1425,7 @@ function CtRatioBox({ token, device, ctRatio, onSaved }) {
 
   return (
     <div style={{
-      padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+      padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -1395,7 +1453,7 @@ function CtRatioBox({ token, device, ctRatio, onSaved }) {
           disabled={!dirty || loading}
           onClick={save}
           style={{
-            padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)',
+            padding: '6px 14px', borderRadius: "var(--radius-xs)", border: '1px solid var(--border)',
             background: 'var(--bg)', color: 'var(--ink)', fontSize: 12, fontWeight: 600,
             cursor: (!dirty || loading) ? 'default' : 'pointer', opacity: (!dirty || loading) ? 0.5 : 1,
           }}
@@ -1437,7 +1495,7 @@ function FirmwareBox({ token, device, firmware, onUpdated }) {
 
   return (
     <div style={{
-      padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+      padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
       display: 'flex', flexDirection: 'column', gap: 8,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
@@ -1456,7 +1514,7 @@ function FirmwareBox({ token, device, firmware, onUpdated }) {
             disabled={loading}
             onClick={update}
             style={{
-              padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)',
+              padding: '6px 14px', borderRadius: "var(--radius-xs)", border: '1px solid var(--border)',
               background: 'var(--bg)', color: 'var(--ink)', fontSize: 12, fontWeight: 600,
               cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.5 : 1, width: 'fit-content',
             }}
@@ -1702,7 +1760,7 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
 
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 20, marginTop: 24,
+        borderRadius: "var(--radius-md)", padding: 20, marginTop: 24,
       }}>
         <button
           onClick={() => setSettingsOpen((o) => !o)}
@@ -1728,7 +1786,7 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
               </>
             ) : (
               <div style={{
-                padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+                padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
                 display: 'flex', flexDirection: 'column', gap: 4,
               }}>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>Enerji/Tepe Sıfırlama, Fabrika Ayarları, Yeniden Başlatma</span>
@@ -1768,7 +1826,7 @@ function PrivacyPolicy() {
       <a href="/" style={{ fontSize: 12, color: 'var(--muted)', textDecoration: 'none' }}>← Binary Enerji'ye dön</a>
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: 12, padding: 32, marginTop: 16, lineHeight: 1.7, fontSize: 14,
+        borderRadius: "var(--radius-md)", padding: 32, marginTop: 16, lineHeight: 1.7, fontSize: 14,
       }}>
         <h1 style={{ fontSize: 20, marginTop: 0 }}>Gizlilik Politikası</h1>
         <p style={{ color: 'var(--muted)', fontSize: 12 }}>Son güncelleme: 17 Ağustos 2026</p>
@@ -1805,6 +1863,12 @@ export default function App() {
   const [devices, setDevices] = useState(null); // null = yükleniyor
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
+  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || 'klasik');
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme]);
 
   function handleLogin(newToken) {
     localStorage.setItem('token', newToken);
@@ -1849,7 +1913,14 @@ export default function App() {
   if (showAccount) {
     return (
       <>
-        <AccountPage token={token} onBack={() => setShowAccount(false)} onLogout={handleLogout} deviceCount={devices?.length} />
+        <AccountPage
+          token={token}
+          onBack={() => setShowAccount(false)}
+          onLogout={handleLogout}
+          deviceCount={devices?.length}
+          theme={theme}
+          onThemeChange={setTheme}
+        />
         <Footer />
       </>
     );

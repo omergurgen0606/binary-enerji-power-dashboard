@@ -1,4 +1,5 @@
-:root {
+:root,
+[data-theme="klasik"] {
   --bg: #F4F6F9;
   --surface: #FFFFFF;
   --ink: #0B1F3A;
@@ -9,6 +10,130 @@
   --l3: #4A5FC1;
   --danger: #C23B3B;
   --warn: #C98A1A;
+  --accent: #1B7A72;
+  --font-display: 'IBM Plex Sans', sans-serif;
+  --font-body: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --shadow-card: none;
+}
+
+/* Yön A — Ölçü Cihazı: laboratuvar güç analizörü hissi */
+[data-theme="olcu-cihazi"] {
+  --bg: #0A0D10;
+  --surface: #14181C;
+  --ink: #E8ECEF;
+  --muted: #7C8792;
+  --border: #242A30;
+  --l1: #E8A33D;
+  --l2: #4FD1C5;
+  --l3: #E8686B;
+  --danger: #FF6B6B;
+  --warn: #E8A33D;
+  --accent: #E8A33D;
+  --font-display: 'JetBrains Mono', monospace;
+  --font-body: 'IBM Plex Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-card: none;
+}
+
+/* Yön B — Kontrol Panosu: elektrik pano dolabı hissi */
+[data-theme="kontrol-panosu"] {
+  --bg: #1C2024;
+  --surface: #262B30;
+  --ink: #F0F1F2;
+  --muted: #8A9198;
+  --border: #34393E;
+  --l1: #FFB020;
+  --l2: #3ECF8E;
+  --l3: #5B8DEF;
+  --danger: #FF5C5C;
+  --warn: #FFB020;
+  --accent: #FFB020;
+  --font-display: 'Archivo', sans-serif;
+  --font-body: 'Public Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --shadow-card: none;
+}
+
+/* Yön C — Marka Enerjisi: sıcak, davetkâr enerji girişimi hissi */
+[data-theme="marka-enerjisi"] {
+  --bg: #F3F7F6;
+  --surface: #FFFFFF;
+  --ink: #0B2624;
+  --muted: #5C7975;
+  --border: #DDE8E5;
+  --l1: #FF7A3D;
+  --l2: #0E4F4B;
+  --l3: #2DD4BF;
+  --danger: #C23B3B;
+  --warn: #FF7A3D;
+  --accent: #0E4F4B;
+  --font-display: 'Fraunces', serif;
+  --font-body: 'Karla', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --shadow-card: 0 8px 20px rgba(14,79,75,0.06);
+}
+
+/* Yön D — Enerji Atlası: faz başına doygun renk, yuvarlak, konsol-app hissi */
+[data-theme="enerji-atlasi"] {
+  --bg: #FBFAFF;
+  --surface: #FFFFFF;
+  --ink: #1A1A2E;
+  --muted: #767089;
+  --border: #ECE9F7;
+  --l1: #FF6B4A;
+  --l2: #16C784;
+  --l3: #6C5CE7;
+  --danger: #E84393;
+  --warn: #FF6B4A;
+  --accent: #6C5CE7;
+  --font-display: 'Sora', sans-serif;
+  --font-body: 'Manrope', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --radius-xs: 10px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
+  --shadow-card: 0 10px 24px rgba(26,26,46,0.05);
+}
+
+/* Yön E — Gündönümü: en sıcak/cesur, gradyan vurgulu hissi */
+[data-theme="gundonumu"] {
+  --bg: #FFF7F0;
+  --surface: #FFFFFF;
+  --ink: #33241C;
+  --muted: #8A7268;
+  --border: #F3E4D6;
+  --l1: #FFB020;
+  --l2: #FF6B4A;
+  --l3: #E84393;
+  --danger: #C23B3B;
+  --warn: #FFB020;
+  --accent: #FF6B4A;
+  --font-display: 'Fredoka', sans-serif;
+  --font-body: 'Work Sans', sans-serif;
+  --font-mono: 'IBM Plex Mono', monospace;
+  --radius-xs: 12px;
+  --radius-sm: 14px;
+  --radius-md: 20px;
+  --radius-lg: 26px;
+  --shadow-card: 0 14px 30px rgba(232,67,147,0.06);
 }
 
 * { box-sizing: border-box; }
@@ -17,12 +142,13 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font-family: 'IBM Plex Sans', sans-serif;
+  font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
+  transition: background 0.25s ease, color 0.25s ease;
 }
 
 .mono {
-  font-family: 'IBM Plex Mono', monospace;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
 }
 
