@@ -1410,6 +1410,70 @@ function CtRatioBox({ token, device, ctRatio, onSaved }) {
   );
 }
 
+function FirmwareBox({ token, device, firmware, onUpdated }) {
+  const [loading, setLoading] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  if (!firmware || !firmware.latest_version) return null;
+
+  const { current_version, latest_version, update_available } = firmware;
+
+  async function update() {
+    setLoading(true);
+    setToast(null);
+    try {
+      await axios.post(`${API_BASE}/devices/${device.device_id}/ota`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setToast({ ok: true, text: 'Güncelleme cihaza gönderildi. Cihaz birkaç dakika içinde yeniden başlayıp yeni sürüme geçecek.' });
+      onUpdated?.();
+    } catch (err) {
+      setToast({ ok: false, text: err.response?.data?.detail || 'Güncelleme gönderilemedi.' });
+    } finally {
+      setLoading(false);
+      setTimeout(() => setToast(null), 8000);
+    }
+  }
+
+  return (
+    <div style={{
+      padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 13, fontWeight: 600 }}>Firmware Sürümü</span>
+        <span className="mono" style={{ fontSize: 13, color: 'var(--muted)' }}>
+          {current_version || '—'}{update_available ? ` → ${latest_version}` : ''}
+        </span>
+      </div>
+      {update_available ? (
+        <>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+            Yeni bir sürüm mevcut. Güncelleme sırasında cihaz kısa süreliğine yeniden başlayacak, ölçüm ve komutlar bu sürede kesintiye uğrayabilir.
+          </span>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={update}
+            style={{
+              padding: '6px 14px', borderRadius: 6, border: '1px solid var(--border)',
+              background: 'var(--bg)', color: 'var(--ink)', fontSize: 12, fontWeight: 600,
+              cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.5 : 1, width: 'fit-content',
+            }}
+          >
+            {loading ? 'Gönderiliyor…' : 'Güncelle'}
+          </button>
+        </>
+      ) : (
+        <span style={{ fontSize: 11, color: 'var(--muted)' }}>Cihaz güncel.</span>
+      )}
+      {toast && (
+        <span style={{ fontSize: 11, color: toast.ok ? 'var(--l2)' : 'var(--danger)' }}>{toast.text}</span>
+      )}
+    </div>
+  );
+}
+
 function DeviceDashboard({ token, device, onBack, onLogout }) {
   const [connected, setConnected] = useState(false);
   const [lastMessageAt, setLastMessageAt] = useState(null);
@@ -1427,7 +1491,19 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
   const [demand, setDemand] = useState(null);
   const [harmonics, setHarmonics] = useState(null);
   const [deviceInfo, setDeviceInfo] = useState(null);
+  const [firmware, setFirmware] = useState(null);
   const wsRef = useRef(null);
+
+  async function fetchFirmware() {
+    try {
+      const res = await axios.get(`${API_BASE}/devices/${device.device_id}/firmware`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setFirmware(res.data);
+    } catch {
+      // sessizce yoksay
+    }
+  }
 
   async function fetchCtRatio() {
     try {
@@ -1460,6 +1536,12 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
   useEffect(() => {
     fetchCtRatio();
     const timer = setInterval(fetchCtRatio, 30000);
+    return () => clearInterval(timer);
+  }, [device.device_id]);
+
+  useEffect(() => {
+    fetchFirmware();
+    const timer = setInterval(fetchFirmware, 30000);
     return () => clearInterval(timer);
   }, [device.device_id]);
 
@@ -1636,6 +1718,7 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
         {settingsOpen && (
           <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
             <CtRatioBox token={token} device={device} ctRatio={ctRatio} onSaved={fetchCtRatio} />
+            <FirmwareBox token={token} device={device} firmware={firmware} onUpdated={fetchFirmware} />
             {deviceInfo ? (
               <>
                 <span style={{ fontSize: 13, fontWeight: 600, marginTop: 8 }}>Cihaz Komutları</span>
