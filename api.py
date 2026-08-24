@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import re
 import hmac
 import io
 import json
@@ -15,7 +16,7 @@ import jwt
 import paho.mqtt.client as mqtt
 import psycopg2
 import resend
-from fastapi import Depends, FastAPI, File, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -119,6 +120,18 @@ app.add_middleware(
 AVATAR_DIR = os.environ.get("AVATAR_DIR", "/app/uploads/avatars")
 os.makedirs(AVATAR_DIR, exist_ok=True)
 app.mount("/avatars", StaticFiles(directory=AVATAR_DIR), name="avatars")
+
+# Firmware .bin dosyalari -- avatarlarla ayni gerekce ile kimlik dogrulamasiz
+# servis ediliyor (ESP32'nin dogrudan indirebilmesi icin, cihazda JWT/login
+# mekanizmasi yok). Yukleme (POST) ise admin-only.
+FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/app/uploads/firmware")
+os.makedirs(FIRMWARE_DIR, exist_ok=True)
+app.mount("/firmware-files", StaticFiles(directory=FIRMWARE_DIR), name="firmware-files")
+
+# Su an tek gercek kullanici oldugu icin firmware yukleme yetkisi buraya
+# hardcoded -- coklu-admin gerekirse users tablosuna bir "is_admin" sutunu
+# eklenip buraya tasinmali.
+FIRMWARE_ADMIN_USERNAMES = {"omer"}
 
 main_loop = None  # asyncio event loop referansı, MQTT thread'inden erişmek için
 
@@ -333,6 +346,143 @@ async def upload_avatar(file: UploadFile = File(...), user: str = Depends(requir
     cur.close()
     conn.close()
     return {"avatar_url": avatar_url_for(user, now)}
+
+# ---------- OTA: firmware yukleme/servis/tetikleme ----------
+VALID_DEVICE_TYPES = {"anl13", "anl21"}
+
+def device_type_from_id(device_id: str) -> str | None:
+    for t in VALID_DEVICE_TYPES:
+        if device_id.startswith(t + "-"):
+            return t
+    return None
+
+@app.post("/admin/firmware")
+async def upload_firmware(
+    file: UploadFile = File(...),
+    device_type: str = Form(...),
+    version: str = Form(...),
+    notes: str = Form(""),
+    user: str = Depends(require_auth),
+):
+    if user not in FIRMWARE_ADMIN_USERNAMES:
+        raise HTTPException(status_code=403, detail="Bu işlem için yetkiniz yok")
+    if device_type not in VALID_DEVICE_TYPES:
+        raise HTTPException(status_code=400, detail=f"Geçersiz cihaz tipi: {device_type}")
+    if not re.match(r"^[a-zA-Z0-9_.-]{1,32}$", version):
+        raise HTTPException(status_code=400, detail="Geçersiz sürüm formatı")
+
+    contents = await file.read()
+    if len(contents) < 1000 or len(contents) > 4 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Geçersiz veya çok büyük .bin dosyası")
+
+    sha256 = hashlib.sha256(contents).hexdigest()
+    filename = f"{device_type}-{version}.bin"
+    with open(os.path.join(FIRMWARE_DIR, filename), "wb") as f:
+        f.write(contents)
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO firmware_builds (device_type, version, filename, sha256, notes) VALUES (%s, %s, %s, %s, %s)",
+        (device_type, version, filename, sha256, notes),
+    )
+    cur.close()
+    conn.close()
+    return {"message": "Firmware yüklendi", "version": version, "sha256": sha256}
+
+@app.get("/firmware/{device_type}/latest")
+def get_latest_firmware(device_type: str, user: str = Depends(require_auth)):
+    if device_type not in VALID_DEVICE_TYPES:
+        raise HTTPException(status_code=400, detail="Geçersiz cihaz tipi")
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT version, filename, sha256, uploaded_at FROM firmware_builds "
+        "WHERE device_type = %s ORDER BY uploaded_at DESC LIMIT 1",
+        (device_type,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return None
+    return {
+        "version": row[0],
+        "url": f"{SITE_URL}/api/firmware-files/{row[1]}",
+        "sha256": row[2],
+        "uploaded_at": row[3].isoformat(),
+    }
+
+@app.get("/devices/{device_id}/firmware")
+def get_device_firmware(device_id: str, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    device_type = device_type_from_id(device_id)
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT fw_version FROM device_settings WHERE device_id = %s", (device_id,))
+    row = cur.fetchone()
+    current_version = row[0] if row else None
+    latest = None
+    if device_type:
+        cur.execute(
+            "SELECT version FROM firmware_builds WHERE device_type = %s ORDER BY uploaded_at DESC LIMIT 1",
+            (device_type,),
+        )
+        latest_row = cur.fetchone()
+        latest = latest_row[0] if latest_row else None
+    cur.close()
+    conn.close()
+    return {
+        "current_version": current_version,
+        "latest_version": latest,
+        "update_available": bool(latest and latest != current_version),
+    }
+
+@app.post("/devices/{device_id}/ota")
+def trigger_ota(device_id: str, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    check_rate_limit(f"ota:{user}", max_attempts=10, window_seconds=60 * 60)
+    device_type = device_type_from_id(device_id)
+    if not device_type:
+        raise HTTPException(status_code=400, detail="Cihaz tipi belirlenemedi")
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT version, filename, sha256 FROM firmware_builds WHERE device_type = %s ORDER BY uploaded_at DESC LIMIT 1",
+        (device_type,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Bu cihaz tipi için yüklenmiş firmware yok")
+
+    version, filename, sha256 = row
+    payload = json.dumps({
+        "url": f"{SITE_URL}/api/firmware-files/{filename}",
+        "version": version,
+        "sha256": sha256,
+    })
+    try:
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+        client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+        connected_evt = threading.Event()
+        client.on_connect = lambda c, u, f, rc, p=None: connected_evt.set()
+        client.connect(MQTT_BROKER, 1883, 10)
+        client.loop_start()
+        connected_evt.wait(timeout=5)
+        client.publish(f"{MQTT_TOPIC_PREFIX}/{device_id}/ota", payload)
+        time.sleep(0.3)
+        client.loop_stop()
+        client.disconnect()
+    except Exception as e:
+        print("OTA tetikleme hatasi:", e)
+        raise HTTPException(status_code=502, detail="OTA komutu cihaza gönderilemedi")
+    return {"message": "OTA güncellemesi tetiklendi", "version": version}
 
 class LoginRequest(BaseModel):
     username: str
@@ -949,12 +1099,15 @@ def mqtt_thread():
             data.get("active_wh_tuketim"), data.get("inductive_varh_tuketim"), data.get("capacitive_varh_tuketim"),
             data.get("active_wh_uretim"), data.get("inductive_varh_uretim"), data.get("capacitive_varh_uretim"),
         ))
-        if data.get("ct_ratio") is not None:
+        if data.get("ct_ratio") is not None or data.get("fw_version") is not None:
             cur.execute("""
-                INSERT INTO device_settings (device_id, ct_ratio, updated_at)
-                VALUES (%s, %s, now())
-                ON CONFLICT (device_id) DO UPDATE SET ct_ratio = EXCLUDED.ct_ratio, updated_at = now()
-            """, (device_id, data.get("ct_ratio")))
+                INSERT INTO device_settings (device_id, ct_ratio, fw_version, updated_at)
+                VALUES (%s, %s, %s, now())
+                ON CONFLICT (device_id) DO UPDATE SET
+                    ct_ratio = COALESCE(EXCLUDED.ct_ratio, device_settings.ct_ratio),
+                    fw_version = COALESCE(EXCLUDED.fw_version, device_settings.fw_version),
+                    updated_at = now()
+            """, (device_id, data.get("ct_ratio"), data.get("fw_version")))
 
     def handle_stats(device_id: str, data: dict):
         values = [data.get(k) for k in STATS_JSON_KEYS]
