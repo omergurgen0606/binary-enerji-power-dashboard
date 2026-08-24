@@ -24,6 +24,9 @@
   --value-tint: 0%;
   --value-glow: none;
   --body-texture: none;
+  --gauge-face: var(--surface);
+  --gauge-ink: var(--muted);
+  --gauge-needle: var(--danger);
 }
 
 /* Yön A — Ölçü Cihazı: laboratuvar güç analizörü hissi */
@@ -147,6 +150,58 @@
   --radius-md: 20px;
   --radius-lg: 26px;
   --shadow-card: 0 14px 30px rgba(232,67,147,0.06);
+}
+
+/* Yön F — Faz Portresi: güç mühendisliğinin fazör diyagramı dili */
+[data-theme="faz-portresi"] {
+  --bg: #0A0E14;
+  --surface: #12181F;
+  --ink: #E4E9EF;
+  --muted: #6B7A8A;
+  --border: #1C2530;
+  --l1: #FFC857;
+  --l2: #2EC4B6;
+  --l3: #E85D75;
+  --danger: #FF6B6B;
+  --warn: #FFC857;
+  --accent: #FFC857;
+  --font-display: 'Space Mono', monospace;
+  --font-body: 'Public Sans', sans-serif;
+  --font-mono: 'Space Mono', monospace;
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-card: none;
+  --value-tint: 100%;
+  --value-glow: 0 0 10px currentColor;
+  --body-texture: radial-gradient(ellipse at 50% -10%, rgba(46,196,182,0.06), transparent 60%);
+}
+
+/* Yön H — Kadran Kümesi: analog ölçü aleti, pirinç/fildişi hissi */
+[data-theme="kadran-kumesi"] {
+  --bg: #1C1712;
+  --surface: #251F17;
+  --ink: #F3E9D2;
+  --muted: #A89A82;
+  --border: #3A2F22;
+  --l1: #D9A35A;
+  --l2: #6B9080;
+  --l3: #A9433A;
+  --danger: #B23A2E;
+  --warn: #D9A35A;
+  --accent: #D9A35A;
+  --font-display: 'Bitter', serif;
+  --font-body: 'Karla', sans-serif;
+  --font-mono: 'Bitter', serif;
+  --radius-xs: 8px;
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --shadow-card: 0 10px 24px rgba(0,0,0,0.35);
+  --gauge-face: #F3E9D2;
+  --gauge-ink: #3B2E22;
+  --gauge-needle: #B23A2E;
 }
 
 * { box-sizing: border-box; }
