@@ -19,6 +19,8 @@ const THEMES = [
   { id: 'marka-enerjisi', name: 'Marka Enerjisi', desc: 'Sıcak, davetkâr, markalı his', swatches: ['#F3F7F6', '#FF7A3D', '#0E4F4B', '#2DD4BF'] },
   { id: 'enerji-atlasi', name: 'Enerji Atlası', desc: 'Faz başına renkli, yuvarlak, canlı', swatches: ['#FBFAFF', '#FF6B4A', '#16C784', '#6C5CE7'] },
   { id: 'gundonumu', name: 'Gündönümü', desc: 'En sıcak ve cesur, gradyan vurgulu', swatches: ['#FFF7F0', '#FFB020', '#FF6B4A', '#E84393'] },
+  { id: 'faz-portresi', name: 'Faz Portresi', desc: 'Fazör diyagramı, gerçek elektrik mühendisliği dili', swatches: ['#0A0E14', '#FFC857', '#2EC4B6', '#E85D75'] },
+  { id: 'kadran-kumesi', name: 'Kadran Kümesi', desc: 'Analog ölçü aleti, pirinç ve fildişi', swatches: ['#1C1712', '#D9A35A', '#6B9080', '#A9433A'] },
 ];
 
 const THEME_STORAGE_KEY = 'theme';
@@ -1044,7 +1046,12 @@ function TabToggle({ options, value, onChange }) {
 }
 
 // ---------- Sistem Özeti (Toplam ve Ortalama Değerler) ----------
-function StatsBlock({ title, data, suffix }) {
+const STATS_GAUGE_RANGE = {
+  p_active: [0, 2000], p_reactive: [0, 2000], p_inductive: [0, 2000], p_capacitive: [0, 2000], p_apparent: [0, 2000],
+  avg_current: [0, 10], avg_active_power: [0, 2000], avg_cos: [0, 1], avg_tan: [-2, 2], avg_pf: [0, 1],
+};
+
+function StatsBlock({ title, data, suffix, theme }) {
   const rows = [
     ['Toplam Aktif Güç', `p_active_${suffix}`, 0, 'W'],
     ['Toplam Reaktif Güç', `p_reactive_${suffix}`, 0, 'VAr'],
@@ -1057,14 +1064,30 @@ function StatsBlock({ title, data, suffix }) {
     ['Ortalama Tan φ', `avg_tan_${suffix}`, 2, ''],
     ['Ortalama Pf', `avg_pf_${suffix}`, 3, ''],
   ];
+
+  if (theme === 'kadran-kumesi') {
+    return (
+      <div style={{ flex: 1, minWidth: 320 }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 10 }}>{title}</div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(96px, 1fr))', gap: 10 }}>
+          {rows.map(([label, key, , unit]) => {
+            const baseKey = key.replace(`_${suffix}`, '');
+            const [min, max] = STATS_GAUGE_RANGE[baseKey] || [0, 100];
+            return <AnalogGauge key={key} value={data?.[key]} min={min} max={max} label={label.replace('Toplam ', '').replace('Ortalama ', '')} unit={unit} size={100} />;
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ flex: 1, minWidth: 260 }}>
-      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 10 }}>{title}</div>
+      <div style={{ fontFamily: 'var(--font-display)', fontSize: 12, fontWeight: 700, color: 'var(--muted)', letterSpacing: 0.5, marginBottom: 10 }}>{title}</div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
         {rows.map(([label, key, digits, unit]) => (
           <div key={key} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
             <span style={{ color: 'var(--muted)' }}>{label}</span>
-            <span className="mono" style={{ fontWeight: 500 }}>{fmt(data?.[key], digits)} {unit}</span>
+            <span className="mono value-readout" style={{ fontWeight: 500 }}>{fmt(data?.[key], digits)} {unit}</span>
           </div>
         ))}
       </div>
@@ -1072,13 +1095,13 @@ function StatsBlock({ title, data, suffix }) {
   );
 }
 
-function StatsSection({ stats }) {
+function StatsSection({ stats, theme }) {
   if (!stats) return null;
   return (
     <SectionCard title="Sistem Özeti (Toplam ve Ortalama)">
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-        <StatsBlock title="TÜKETİM (IMPORT)" data={stats} suffix="imp" />
-        <StatsBlock title="ÜRETİM (EXPORT)" data={stats} suffix="exp" />
+        <StatsBlock title="TÜKETİM (IMPORT)" data={stats} suffix="imp" theme={theme} />
+        <StatsBlock title="ÜRETİM (EXPORT)" data={stats} suffix="exp" theme={theme} />
       </div>
       <div style={{ display: 'flex', gap: 24, marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)', flexWrap: 'wrap', fontSize: 13 }}>
         <div><span style={{ color: 'var(--muted)' }}>Ort. Gerilim (LN): </span><span className="mono" style={{ fontWeight: 500 }}>{fmt(stats.avg_voltage_ln)} V</span></div>
@@ -1539,7 +1562,149 @@ function FirmwareBox({ token, device, firmware, onUpdated }) {
   );
 }
 
-function DeviceDashboard({ token, device, onBack, onLogout }) {
+/* ---------- Yön H: analog kadran ---------- */
+const GAUGE_TICKS = [
+  [18, 88, 26, 88], [22.7, 64.3, 30.1, 67.3], [36.2, 44.2, 41.8, 49.8], [56.3, 30.7, 59.3, 38.1],
+  [80, 26, 80, 34], [103.7, 30.7, 100.7, 38.1], [123.8, 44.2, 118.2, 49.8], [137.3, 64.3, 129.9, 67.3], [142, 88, 134, 88],
+];
+
+function gaugeNeedlePoint(value, min, max, len) {
+  const f = Math.max(0, Math.min(1, max > min ? (value - min) / (max - min) : 0));
+  const angle = Math.PI - f * Math.PI;
+  return { x: 80 + len * Math.cos(angle), y: 88 - len * Math.sin(angle) };
+}
+
+function AnalogGauge({ value, min, max, label, unit, size = 130, big = false }) {
+  const needle = gaugeNeedlePoint(value ?? min, min, max, big ? 52 : 46);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <svg width={size} height={size * 0.64} viewBox="0 0 160 100">
+        <path d="M 18 88 A 62 62 0 0 1 142 88" fill="none" stroke="var(--accent)" strokeOpacity="0.55" strokeWidth={big ? 16 : 12} />
+        <circle cx="80" cy="60" r="52" fill="var(--gauge-face)" />
+        <circle cx="80" cy="60" r="52" fill="none" stroke="var(--gauge-ink)" strokeOpacity="0.25" strokeWidth="1" />
+        <g stroke="var(--gauge-ink)" strokeWidth={big ? 1.6 : 1.3} opacity="0.75">
+          {GAUGE_TICKS.map((t, idx) => (
+            <line key={idx} x1={t[0]} y1={t[1]} x2={t[2]} y2={t[3]} />
+          ))}
+        </g>
+        <text x="12" y="98" fontFamily="var(--font-mono)" fontSize="8" fill="var(--gauge-ink)">{fmt(min, 0)}</text>
+        <text x="70" y="20" fontFamily="var(--font-mono)" fontSize="8" fill="var(--gauge-ink)">{fmt((min + max) / 2, 0)}</text>
+        <text x="122" y="98" fontFamily="var(--font-mono)" fontSize="8" fill="var(--gauge-ink)">{fmt(max, 0)}</text>
+        <line x1="80" y1="88" x2={needle.x} y2={needle.y} stroke="var(--gauge-needle)" strokeWidth={big ? 2.6 : 2.1} strokeLinecap="round" />
+        <circle cx="80" cy="88" r={big ? 6 : 5} fill="var(--accent)" stroke="var(--gauge-ink)" strokeOpacity="0.3" strokeWidth="1.2" />
+      </svg>
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: big ? 12.5 : 11, color: 'var(--muted)', marginTop: 4, textAlign: 'center' }}>{label}</div>
+      <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: big ? 15 : 13, color: 'var(--ink)' }}>
+        {value != null ? fmt(value, Math.abs(max - min) > 100 ? 0 : 1) : '—'}{unit ? ` ${unit}` : ''}
+      </div>
+    </div>
+  );
+}
+
+function GaugeCluster({ latest, firmware }) {
+  const totalP = (latest.p1 ?? 0) + (latest.p2 ?? 0) + (latest.p3 ?? 0);
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-card)',
+      padding: '26px 28px', marginBottom: 28,
+    }}>
+      <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', justifyContent: 'space-around' }}>
+        <AnalogGauge value={totalP} min={0} max={2000} label="TOPLAM AKTİF GÜÇ" unit="W" size={180} big />
+        <AnalogGauge value={latest.v1} min={200} max={240} label="L1" unit="V" size={130} />
+        <AnalogGauge value={latest.v2} min={200} max={240} label="L2" unit="V" size={130} />
+        <AnalogGauge value={latest.v3} min={200} max={240} label="L3" unit="V" size={130} />
+      </div>
+      <div style={{
+        display: 'flex', gap: 22, marginTop: 22, paddingTop: 18,
+        borderTop: '1px solid var(--border)', flexWrap: 'wrap', fontSize: 12.5, color: 'var(--muted)',
+      }}>
+        <span>Frekans: <b style={{ color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}>{fmt(latest.f1, 2)} Hz</b></span>
+        <span>Nötr: <b style={{ color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}>{fmt(latest.vN, 1)} V</b></span>
+        {firmware && <span>Firmware: <b style={{ color: 'var(--ink)', fontFamily: 'var(--font-mono)' }}>{firmware.current_version ?? '—'}</b></span>}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Yön F: fazör diyagramı ---------- */
+function phasorPoint(angleDeg, radius, cx = 110, cy = 110) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return { x: cx + radius * Math.cos(rad), y: cy + radius * Math.sin(rad) };
+}
+
+const PHASOR_PHASES = [
+  { key: '1', label: 'L1', color: 'var(--l1)', angle: -90 },
+  { key: '2', label: 'L2', color: 'var(--l2)', angle: 30 },
+  { key: '3', label: 'L3', color: 'var(--l3)', angle: 150 },
+];
+
+function PhasorStat({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 10.5, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
+      <div className="mono" style={{ fontSize: 15, fontWeight: 700, color: 'var(--ink)' }}>{value}</div>
+    </div>
+  );
+}
+
+function PhasorDiagram({ latest, energy, firmware }) {
+  const VREF = 250, IREF = 10;
+  const totalP = (latest.p1 ?? 0) + (latest.p2 ?? 0) + (latest.p3 ?? 0);
+  return (
+    <div style={{
+      background: 'var(--surface)', border: '1px solid var(--border)',
+      borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-card)',
+      padding: '28px 32px', marginBottom: 28,
+    }}>
+      <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center' }}>
+        <svg width="240" height="240" viewBox="0 0 220 220">
+          <circle cx="110" cy="110" r="85" fill="none" stroke="var(--border)" strokeWidth="1" />
+          <circle cx="110" cy="110" r="56" fill="none" stroke="var(--border)" strokeWidth="1" />
+          <circle cx="110" cy="110" r="28" fill="none" stroke="var(--border)" strokeWidth="1" />
+          {PHASOR_PHASES.map((ph) => {
+            const v = latest[`v${ph.key}`] ?? 0;
+            const i = latest[`i${ph.key}`] ?? 0;
+            const pf = latest[`pf${ph.key}`];
+            const phi = pf != null ? (Math.acos(Math.max(-1, Math.min(1, pf))) * 180) / Math.PI : 0;
+            const rV = 85 * Math.max(0.12, Math.min(1, v / VREF));
+            const rI = 62 * Math.max(0.08, Math.min(1, i / IREF));
+            const tipV = phasorPoint(ph.angle, rV);
+            const tipI = phasorPoint(ph.angle + phi, rI);
+            return (
+              <g key={ph.key}>
+                <line x1="110" y1="110" x2={tipI.x} y2={tipI.y} stroke={ph.color} strokeWidth="1.4" strokeDasharray="3 3" opacity="0.55" />
+                <line x1="110" y1="110" x2={tipV.x} y2={tipV.y} stroke={ph.color} strokeWidth="2.6" strokeLinecap="round" />
+                <circle cx={tipV.x} cy={tipV.y} r="4.5" fill={ph.color} />
+              </g>
+            );
+          })}
+          <circle cx="110" cy="110" r="4" fill="var(--ink)" />
+        </svg>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14, minWidth: 190 }}>
+          {PHASOR_PHASES.map((ph) => (
+            <div key={ph.key} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ width: 9, height: 9, borderRadius: '50%', background: ph.color, flexShrink: 0 }} />
+              <div style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.4 }}>
+                <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, color: 'var(--ink)' }}>{ph.label}</span>
+                {'  '}<span className="mono" style={{ fontWeight: 700, color: 'var(--ink)' }}>{fmt(latest[`v${ph.key}`], 1)} V</span>
+                <br />{fmt(latest[`i${ph.key}`], 3)} A · cos φ {fmt(latest[`pf${ph.key}`], 2)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 24, marginTop: 24, paddingTop: 18, borderTop: '1px solid var(--border)', flexWrap: 'wrap' }}>
+        <PhasorStat label="Toplam Güç" value={`${fmt(totalP, 0)} W`} />
+        <PhasorStat label="Bugün" value={formatKwh(energy?.active_wh_tuketim ?? 0)} />
+        <PhasorStat label="Frekans" value={`${fmt(latest.f1, 2)} Hz`} />
+        {firmware && <PhasorStat label="Firmware" value={firmware.current_version ?? '—'} />}
+      </div>
+    </div>
+  );
+}
+
+function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
   const [connected, setConnected] = useState(false);
   const [lastMessageAt, setLastMessageAt] = useState(null);
   const [esp32Status, setEsp32Status] = useState(null); // 'online' | 'offline' | null (henüz bilinmiyor)
@@ -1706,37 +1871,45 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
         </div>
       </header>
 
-      <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
-        {PHASES.map((ph) => (
-          <PhaseCard
-            key={ph.key}
-            label={ph.label}
-            color={ph.color}
-            v={latest[`v${ph.key}`]}
-            i={latest[`i${ph.key}`]}
-            p={latest[`p${ph.key}`]}
-            q={latest[`q${ph.key}`]}
-            s={latest[`s${ph.key}`]}
-            pf={latest[`pf${ph.key}`]}
-            thd={latest[`thd${ph.key}`]}
-            thvd={latest[`thvd${ph.key}`]}
-            pulse={pulseKey}
-          />
-        ))}
-      </div>
+      {theme === 'faz-portresi' ? (
+        <PhasorDiagram latest={latest} energy={energy} firmware={firmware} />
+      ) : theme === 'kadran-kumesi' ? (
+        <GaugeCluster latest={latest} firmware={firmware} />
+      ) : (
+        <>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+            {PHASES.map((ph) => (
+              <PhaseCard
+                key={ph.key}
+                label={ph.label}
+                color={ph.color}
+                v={latest[`v${ph.key}`]}
+                i={latest[`i${ph.key}`]}
+                p={latest[`p${ph.key}`]}
+                q={latest[`q${ph.key}`]}
+                s={latest[`s${ph.key}`]}
+                pf={latest[`pf${ph.key}`]}
+                thd={latest[`thd${ph.key}`]}
+                thvd={latest[`thvd${ph.key}`]}
+                pulse={pulseKey}
+              />
+            ))}
+          </div>
 
-      <div style={{ display: 'flex', gap: 32, marginBottom: 24, fontSize: 14, flexWrap: 'wrap' }}>
-        <div>
-          <span style={{ color: 'var(--muted)' }}>Frekans: </span>
-          <span className="mono" style={{ fontWeight: 500 }}>{latest.f1 != null ? latest.f1.toFixed(2) : '—'} Hz</span>
-        </div>
-        <div>
-          <span style={{ color: 'var(--muted)' }}>Nötr: </span>
-          <span className="mono" style={{ fontWeight: 500 }}>
-            {latest.vN != null ? latest.vN.toFixed(1) : '—'} V, {latest.iN != null ? latest.iN.toFixed(3) : '—'} A
-          </span>
-        </div>
-      </div>
+          <div style={{ display: 'flex', gap: 32, marginBottom: 24, fontSize: 14, flexWrap: 'wrap' }}>
+            <div>
+              <span style={{ color: 'var(--muted)' }}>Frekans: </span>
+              <span className="mono" style={{ fontWeight: 500 }}>{latest.f1 != null ? latest.f1.toFixed(2) : '—'} Hz</span>
+            </div>
+            <div>
+              <span style={{ color: 'var(--muted)' }}>Nötr: </span>
+              <span className="mono" style={{ fontWeight: 500 }}>
+                {latest.vN != null ? latest.vN.toFixed(1) : '—'} V, {latest.iN != null ? latest.iN.toFixed(3) : '—'} A
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
       <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Gerilim &amp; Akım Dalga Formu</div>
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
@@ -1759,7 +1932,7 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
         <EnergyCard title="Üretim" data={energy} suffix="uretim" onClick={() => setHourlyModal({ title: 'Üretim', suffix: 'uretim' })} />
       </div>
 
-      <StatsSection stats={stats} />
+      <StatsSection stats={stats} theme={theme} />
       <PeaksSection peaks={peaks} />
       <DemandSection demand={demand} />
       <HarmonicsSection harmonics={harmonics} />
@@ -1941,6 +2114,7 @@ export default function App() {
           device={selectedDevice}
           onBack={() => setSelectedDevice(null)}
           onLogout={handleLogout}
+          theme={theme}
         />
         <Footer />
       </>
