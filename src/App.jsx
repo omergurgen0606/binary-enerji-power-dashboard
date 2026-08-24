@@ -634,7 +634,7 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, token, onDevic
       </div>
       <img src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
       <div style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1, marginBottom: 4, textAlign: 'center' }}>BINARY ENERJİ</div>
-      <h1 style={{ margin: '0 0 24px', fontSize: 22, fontWeight: 700, textAlign: 'center' }}>Cihazlarım</h1>
+      <h1 style={{ margin: '0 0 24px', fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, textAlign: 'center' }}>Cihazlarım</h1>
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
         borderRadius: "var(--radius-md)", padding: 24,
@@ -703,9 +703,11 @@ function Metric({ label, value, digits, unit }) {
 function PhaseCard({ label, color, v, i, p, q, s, pf, thd, thvd, pulse }) {
   return (
     <div style={{
-      background: 'var(--surface)',
+      background: `color-mix(in srgb, ${color} var(--card-tint), var(--surface))`,
       border: '1px solid var(--border)',
+      borderTop: '3px solid var(--card-accent)',
       borderRadius: "var(--radius-md)",
+      boxShadow: 'var(--shadow-card)',
       padding: '20px 24px',
       flex: 1,
       minWidth: 200,
@@ -716,10 +718,10 @@ function PhaseCard({ label, color, v, i, p, q, s, pf, thd, thvd, pulse }) {
           boxShadow: pulse ? `0 0 0 4px ${color}33` : 'none',
           transition: 'box-shadow 0.3s ease',
         }} />
-        <span style={{ fontWeight: 600, fontSize: 14, letterSpacing: 0.5 }}>{label}</span>
+        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, letterSpacing: 0.5 }}>{label}</span>
       </div>
-      <div className="mono" style={{ fontSize: 28, fontWeight: 500 }}>
-        {v != null ? v.toFixed(1) : '—'} <span style={{ fontSize: 14, color: 'var(--muted)' }}>V</span>
+      <div className="mono value-readout" style={{ fontSize: 28, fontWeight: 500, color: `color-mix(in srgb, ${color} var(--value-tint, 0%), var(--ink))` }}>
+        {v != null ? v.toFixed(1) : '—'} <span style={{ fontSize: 14, color: 'var(--muted)', textShadow: 'none' }}>V</span>
       </div>
       <div style={{ display: 'flex', gap: 20, marginTop: 10, flexWrap: 'wrap', rowGap: 10 }}>
         <Metric label="AKIM" value={i} digits={3} unit="A" />
@@ -764,12 +766,14 @@ function EnergyCard({ title, data, suffix, onClick }) {
       className={onClick ? 'dash-card' : undefined}
       style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: "var(--radius-md)", padding: '20px 24px', flex: 1, minWidth: 220,
+        borderTop: '3px solid var(--card-accent)',
+        borderRadius: "var(--radius-md)", boxShadow: 'var(--shadow-card)',
+        padding: '20px 24px', flex: 1, minWidth: 220,
         cursor: onClick ? 'pointer' : 'default',
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14 }}>{title}</div>
         {onClick && <span style={{ fontSize: 11, color: 'var(--muted)' }}>Saatlik detay →</span>}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -955,11 +959,12 @@ function WaveformCard({ label, color, v, i, cosPhi, q }) {
   return (
     <div style={{
       background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: "var(--radius-md)", padding: '16px 20px', flex: 1, minWidth: 280, height: 260,
+      borderRadius: "var(--radius-md)", boxShadow: 'var(--shadow-card)',
+      padding: '16px 20px', flex: 1, minWidth: 280, height: 260,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span style={{ width: 10, height: 10, borderRadius: '50%', background: color }} />
-        <span style={{ fontWeight: 600, fontSize: 13 }}>{label}</span>
+        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13 }}>{label}</span>
       </div>
       {data.length === 0 ? (
         <div className="waveform-empty">
@@ -998,10 +1003,12 @@ function SectionCard({ title, right, children }) {
   return (
     <div style={{
       background: 'var(--surface)', border: '1px solid var(--border)',
-      borderRadius: "var(--radius-md)", padding: 20, marginTop: 24,
+      borderTop: '3px solid var(--card-accent)',
+      borderRadius: "var(--radius-md)", boxShadow: 'var(--shadow-card)',
+      padding: 20, marginTop: 24,
     }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ fontWeight: 600, fontSize: 14 }}>{title}</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14 }}>{title}</div>
         {right}
       </div>
       {children}
@@ -1677,7 +1684,7 @@ function DeviceDashboard({ token, device, onBack, onLogout }) {
             <img src="/logo.png" alt="Binary Enerji" style={{ height: 16 }} />
             <span style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1 }}>BINARY ENERJİ</span>
           </div>
-          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>{device.name}</h1>
+          <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700 }}>{device.name}</h1>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end', fontSize: 13 }}>
