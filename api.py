@@ -10,7 +10,7 @@ import secrets
 import threading
 import time
 import traceback
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import bcrypt
 import gspread
@@ -146,10 +146,10 @@ FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/app/uploads/firmware")
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
 app.mount("/firmware-files", StaticFiles(directory=FIRMWARE_DIR), name="firmware-files")
 
-# Su an tek gercek kullanici oldugu icin firmware yukleme yetkisi buraya
-# hardcoded -- coklu-admin gerekirse users tablosuna bir "is_admin" sutunu
-# eklenip buraya tasinmali.
-FIRMWARE_ADMIN_USERNAMES = {"omer"}
+# Cihazi bir bagimsiz ariza mi yoksa "hic kurulmamis" mi diye ayirt edebilmek icin
+# esikler: bu sureden uzun sessiz kalan cihaz filo panelinde uyari olarak gosterilir.
+FLEET_STALE_MINUTES = 10
+FLEET_DEAD_HOURS = 24
 
 main_loop = None  # asyncio event loop referansı, MQTT thread'inden erişmek için
 
@@ -191,6 +191,24 @@ def require_auth(authorization: str | None = Header(None)) -> str:
     if not username:
         raise HTTPException(status_code=401, detail="Geçersiz token")
     return username
+
+
+def get_user_role(username: str) -> str:
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT role FROM users WHERE username = %s", (username,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row[0] if row else "user"
+
+
+def require_admin(user: str = Depends(require_auth)) -> str:
+    """Uretici/yonetici yetkisi gerektiren uc noktalar icin. Rol users.role
+    sutunundan okunuyor -- daha once tek kullanici adi koda gomuluydu."""
+    if get_user_role(user) != "admin":
+        raise HTTPException(status_code=403, detail="Bu işlem için yönetici yetkisi gerekiyor")
+    return user
 
 # ---------- Cihaz sahipliği ----------
 def get_owned_devices(username: str) -> list[dict]:
@@ -290,7 +308,7 @@ def get_me(user: str = Depends(require_auth)):
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     cur.execute(
-        "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at, is_verified "
+        "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at, is_verified, role "
         "FROM users WHERE username = %s",
         (user,),
     )
@@ -304,6 +322,7 @@ def get_me(user: str = Depends(require_auth)):
         "created_at": row[5].isoformat() if row[5] else None,
         "avatar_url": avatar_url_for(row[2], row[6]),
         "is_verified": row[7],
+        "role": row[8],
     }
 
 class ChangePasswordRequest(BaseModel):
@@ -467,10 +486,8 @@ async def upload_firmware(
     device_type: str = Form(...),
     version: str = Form(...),
     notes: str = Form(""),
-    user: str = Depends(require_auth),
+    user: str = Depends(require_admin),
 ):
-    if user not in FIRMWARE_ADMIN_USERNAMES:
-        raise HTTPException(status_code=403, detail="Bu işlem için yetkiniz yok")
     if device_type not in VALID_DEVICE_TYPES:
         raise HTTPException(status_code=400, detail=f"Geçersiz cihaz tipi: {device_type}")
     if not re.match(r"^[a-zA-Z0-9_.-]{1,32}$", version):
@@ -495,6 +512,76 @@ async def upload_firmware(
     cur.close()
     conn.close()
     return {"message": "Firmware yüklendi", "version": version, "sha256": sha256}
+
+@app.get("/admin/fleet")
+def admin_fleet(user: str = Depends(require_admin)):
+    """Uretici gorunumu: satilan/kurulan tum cihazlar, canli durumlari ve firmware
+    dagilimi. Sahalik ariza tespiti icin 'ne zamandir susuyor' bilgisi kritik."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    # Cihaz basina son olcum zamanini tek sorguda al -- her cihaz icin ayri
+    # sorgu atmak filo buyudukce N+1'e donusurdu.
+    cur.execute("""
+        SELECT d.device_id, d.name, d.owner_username, d.created_at,
+               s.fw_version, s.ct_ratio,
+               m.last_seen,
+               (SELECT count(*) FROM alarm_rules r WHERE r.device_id = d.device_id AND r.is_active) AS active_alarms
+        FROM devices d
+        LEFT JOIN device_settings s ON s.device_id = d.device_id
+        LEFT JOIN (
+            SELECT device_id, max(time) AS last_seen FROM measurements GROUP BY device_id
+        ) m ON m.device_id = d.device_id
+        ORDER BY d.created_at DESC NULLS LAST, d.id DESC
+    """)
+    rows = cur.fetchall()
+
+    cur.execute("""
+        SELECT s.fw_version, count(*) FROM devices d
+        LEFT JOIN device_settings s ON s.device_id = d.device_id
+        GROUP BY s.fw_version ORDER BY count(*) DESC
+    """)
+    firmware_rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    now = datetime.now(timezone.utc)
+    devices = []
+    counts = {"online": 0, "stale": 0, "dead": 0, "never": 0}
+    for device_id, name, owner, created_at, fw, ct_ratio, last_seen, active_alarms in rows:
+        if last_seen is None:
+            status, minutes_silent = "never", None
+        else:
+            minutes_silent = (now - last_seen).total_seconds() / 60
+            if minutes_silent <= FLEET_STALE_MINUTES:
+                status = "online"
+            elif minutes_silent <= FLEET_DEAD_HOURS * 60:
+                status = "stale"
+            else:
+                status = "dead"
+        counts[status] += 1
+        devices.append({
+            "device_id": device_id,
+            "name": name,
+            "owner": owner,
+            "device_type": device_type_from_id(device_id),
+            "claimed_at": created_at.isoformat() if created_at else None,
+            "fw_version": fw,
+            "ct_ratio": ct_ratio,
+            "last_seen": last_seen.isoformat() if last_seen else None,
+            "minutes_silent": round(minutes_silent) if minutes_silent is not None else None,
+            "status": status,
+            "active_alarms": active_alarms,
+        })
+
+    return {
+        "total": len(devices),
+        "counts": counts,
+        "firmware_distribution": [
+            {"version": v or "(bilinmiyor)", "count": c} for v, c in firmware_rows
+        ],
+        "devices": devices,
+    }
+
 
 @app.get("/firmware/{device_type}/latest")
 def get_latest_firmware(device_type: str, user: str = Depends(require_auth)):
