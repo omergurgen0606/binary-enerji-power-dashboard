@@ -661,9 +661,10 @@ def get_energy(device_id: str, user: str = Depends(require_auth)):
     return dict(zip(columns, row))
 
 @app.get("/energy/hourly")
-def get_energy_hourly(device_id: str, format: str = "json", user: str = Depends(require_auth)):
+def get_energy_hourly(device_id: str, format: str = "json", days: int = 7, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    days = max(1, min(days, 90))
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     cur.execute("""
@@ -678,7 +679,7 @@ def get_energy_hourly(device_id: str, format: str = "json", user: str = Depends(
                 last(inductive_varh_uretim, time) AS inductive_uretim,
                 last(capacitive_varh_uretim, time) AS capacitive_uretim
             FROM device_energy
-            WHERE device_id = %s AND time > now() - interval '7 days'
+            WHERE device_id = %s AND time > now() - (%s * interval '1 day')
             GROUP BY bucket
         )
         SELECT
@@ -691,7 +692,7 @@ def get_energy_hourly(device_id: str, format: str = "json", user: str = Depends(
             capacitive_uretim, capacitive_uretim - LAG(capacitive_uretim) OVER (ORDER BY bucket) AS delta_capacitive_uretim
         FROM hourly
         ORDER BY bucket DESC
-    """, (device_id,))
+    """, (device_id, days))
     rows = cur.fetchall()
     cur.close()
     conn.close()
