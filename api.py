@@ -210,24 +210,107 @@ def require_admin(user: str = Depends(require_auth)) -> str:
         raise HTTPException(status_code=403, detail="Bu işlem için yönetici yetkisi gerekiyor")
     return user
 
-# ---------- Cihaz sahipliği ----------
+# ---------- Cihaz erişimi (Organizasyon → Tesis → Bölüm) ----------
+# Yetki modeli kapsam-tabanli: rol "ne yapabilirsin"i degil "neyi gorebilirsin"i
+# belirliyor (Entes Enerji Doktoru'nun modeliyle ayni eksende).
+#   org_admin          -> organizasyonun tum cihazlari
+#   facility_manager   -> sadece atandigi tesislerin cihazlari
+#   department_manager -> sadece atandigi bolumlerin cihazlari
+#
+# Not: devices.owner_username hala duruyor ama artik yetki icin KULLANILMIYOR --
+# sadece "bu cihazi kim kaydetti" kaydi olarak tutuluyor.
+ORG_ROLES = ("org_admin", "facility_manager", "department_manager")
+
+# Bir kullanicinin erisebildigi cihazlari veren tek sorgu. Hem listeleme hem de
+# tekil erisim kontrolu bunun uzerinden yurur ki iki yerde ayrisip guvenlik acigi
+# olusturmasin.
+_ACCESSIBLE_DEVICES_SQL = """
+    SELECT d.device_id, d.name, d.facility_id, d.department_id,
+           f.name AS facility_name, dep.name AS department_name,
+           f.organization_id
+    FROM devices d
+    JOIN facilities f ON f.id = d.facility_id
+    JOIN org_members m ON m.organization_id = f.organization_id
+    LEFT JOIN departments dep ON dep.id = d.department_id
+    WHERE m.username = %s
+      AND (
+        m.role = 'org_admin'
+        OR (m.role = 'facility_manager'
+            AND d.facility_id IN (SELECT facility_id FROM member_facilities WHERE member_id = m.id))
+        OR (m.role = 'department_manager'
+            AND d.department_id IS NOT NULL
+            AND d.department_id IN (SELECT department_id FROM member_departments WHERE member_id = m.id))
+      )
+"""
+
+
 def get_owned_devices(username: str) -> list[dict]:
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
-    cur.execute("SELECT device_id, name FROM devices WHERE owner_username = %s ORDER BY id", (username,))
+    cur.execute(_ACCESSIBLE_DEVICES_SQL + " ORDER BY f.name, dep.name NULLS FIRST, d.id", (username,))
     rows = cur.fetchall()
     cur.close()
     conn.close()
-    return [{"device_id": r[0], "name": r[1]} for r in rows]
+    return [
+        {
+            "device_id": r[0], "name": r[1],
+            "facility_id": r[2], "department_id": r[3],
+            "facility_name": r[4], "department_name": r[5],
+        }
+        for r in rows
+    ]
+
 
 def is_device_owner(username: str, device_id: str) -> bool:
+    """Isim geriye donuk uyumluluk icin korundu; artik 'sahiplik' degil
+    'kapsam icinde erisim' anlamina geliyor."""
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
-    cur.execute("SELECT 1 FROM devices WHERE owner_username = %s AND device_id = %s", (username, device_id))
+    cur.execute(
+        "SELECT 1 FROM (" + _ACCESSIBLE_DEVICES_SQL + ") AS accessible WHERE device_id = %s",
+        (username, device_id),
+    )
     row = cur.fetchone()
     cur.close()
     conn.close()
     return row is not None
+
+
+def get_membership(username: str) -> dict | None:
+    """Kullanicinin organizasyon uyeligi + kapsami."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT m.id, m.organization_id, m.role, o.name
+        FROM org_members m JOIN organizations o ON o.id = m.organization_id
+        WHERE m.username = %s
+    """, (username,))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        return None
+    member_id, org_id, role, org_name = row
+    cur.execute("SELECT facility_id FROM member_facilities WHERE member_id = %s", (member_id,))
+    facility_ids = [r[0] for r in cur.fetchall()]
+    cur.execute("SELECT department_id FROM member_departments WHERE member_id = %s", (member_id,))
+    department_ids = [r[0] for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return {
+        "member_id": member_id, "organization_id": org_id, "role": role,
+        "organization_name": org_name,
+        "facility_ids": facility_ids, "department_ids": department_ids,
+    }
+
+
+def require_org_admin(user: str = Depends(require_auth)) -> str:
+    """Organizasyon yapisini ve uyeleri yonetmek icin. Tesis/bolum sorumlulari
+    kendi kapsamlarindaki cihazlari yonetir ama organizasyon yapisina dokunamaz."""
+    m = get_membership(user)
+    if not m or m["role"] != "org_admin":
+        raise HTTPException(status_code=403, detail="Bu işlem için organizasyon yöneticisi olmanız gerekiyor")
+    return user
 
 @app.get("/devices")
 def list_devices(user: str = Depends(require_auth)):
@@ -237,6 +320,8 @@ class AddDeviceRequest(BaseModel):
     device_id: str
     name: str
     claim_code: str
+    facility_id: int | None = None
+    department_id: int | None = None
 
 @app.post("/devices")
 def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
@@ -251,13 +336,26 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
     check_rate_limit(f"claim:{device_id}", max_attempts=10, window_seconds=60 * 60)
     if not hmac.compare_digest(claim_code, compute_claim_code(device_id)):
         raise HTTPException(status_code=403, detail="Kurulum kodu hatalı — cihaz etiketindeki kodu kontrol edin")
+
+    membership = get_membership(user)
+    if not membership:
+        raise HTTPException(status_code=403, detail="Bir organizasyona bağlı değilsiniz")
+    if membership["role"] == "department_manager":
+        raise HTTPException(status_code=403, detail="Bölüm sorumluları cihaz ekleyemez")
+
+    facility_id = resolve_target_facility(membership, payload.facility_id)
+    department_id = payload.department_id
+    if department_id is not None and not department_belongs_to(department_id, facility_id):
+        raise HTTPException(status_code=400, detail="Seçilen bölüm bu tesise ait değil")
+
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
     cur = conn.cursor()
     try:
         cur.execute(
-            "INSERT INTO devices (device_id, name, owner_username) VALUES (%s, %s, %s)",
-            (device_id, name, user),
+            "INSERT INTO devices (device_id, name, owner_username, facility_id, department_id) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (device_id, name, user, facility_id, department_id),
         )
     except psycopg2.IntegrityError:
         raise HTTPException(status_code=409, detail="Bu cihaz ID'si zaten kayıtlı")
@@ -266,6 +364,44 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
         conn.close()
     return {"message": "Cihaz eklendi"}
 
+
+def resolve_target_facility(membership: dict, requested_facility_id: int | None) -> int:
+    """Cihazin hangi tesise ekleneceğini belirler ve kullanicinin o tesise
+    yetkisi olduğunu doğrular. Tek tesisli (küçük müşteri) durumda seçim
+    gerekmeden otomatik çözülür."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    if membership["role"] == "org_admin":
+        cur.execute(
+            "SELECT id FROM facilities WHERE organization_id = %s ORDER BY id",
+            (membership["organization_id"],),
+        )
+        allowed = [r[0] for r in cur.fetchall()]
+    else:
+        allowed = membership["facility_ids"]
+    cur.close()
+    conn.close()
+
+    if not allowed:
+        raise HTTPException(status_code=400, detail="Cihaz eklenebilecek bir tesis yok, önce tesis oluşturun")
+    if requested_facility_id is None:
+        if len(allowed) > 1:
+            raise HTTPException(status_code=400, detail="Birden fazla tesisiniz var, cihazın ekleneceği tesisi seçin")
+        return allowed[0]
+    if requested_facility_id not in allowed:
+        raise HTTPException(status_code=403, detail="Bu tesise cihaz ekleme yetkiniz yok")
+    return requested_facility_id
+
+
+def department_belongs_to(department_id: int, facility_id: int) -> bool:
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM departments WHERE id = %s AND facility_id = %s", (department_id, facility_id))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    return row is not None
+
 @app.delete("/devices/{device_id}")
 def remove_device(device_id: str, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
@@ -273,9 +409,10 @@ def remove_device(device_id: str, user: str = Depends(require_auth)):
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
     cur = conn.cursor()
-    # Ölçüm geçmişi bilerek silinmiyor — sadece sahiplik kaldırılıyor. Cihaz veri
+    # Ölçüm geçmişi bilerek silinmiyor — sadece kayıt kaldırılıyor. Cihaz veri
     # göndermeye devam ederse sahipsiz kalır, tekrar kurulum koduyla eklenebilir.
-    cur.execute("DELETE FROM devices WHERE device_id = %s AND owner_username = %s", (device_id, user))
+    # Erişim zaten yukarıda is_device_owner ile doğrulandı.
+    cur.execute("DELETE FROM devices WHERE device_id = %s", (device_id,))
     cur.close()
     conn.close()
     return {"message": "Cihaz kaldırıldı"}
@@ -293,7 +430,7 @@ def rename_device(device_id: str, payload: RenameDeviceRequest, user: str = Depe
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
     cur = conn.cursor()
-    cur.execute("UPDATE devices SET name = %s WHERE device_id = %s AND owner_username = %s", (name, device_id, user))
+    cur.execute("UPDATE devices SET name = %s WHERE device_id = %s", (name, device_id))
     cur.close()
     conn.close()
     return {"message": "Cihaz adı güncellendi"}
@@ -512,6 +649,290 @@ async def upload_firmware(
     cur.close()
     conn.close()
     return {"message": "Firmware yüklendi", "version": version, "sha256": sha256}
+
+# ---------- Organizasyon yapısı ve üyeler ----------
+
+class FacilityRequest(BaseModel):
+    name: str
+
+class DepartmentRequest(BaseModel):
+    facility_id: int
+    name: str
+
+class MemberRoleRequest(BaseModel):
+    role: str
+    facility_ids: list[int] = []
+    department_ids: list[int] = []
+
+
+@app.get("/organization")
+def get_organization(user: str = Depends(require_auth)):
+    """Kullanicinin organizasyonu: tesisler, bolumler, uyeler ve kendi kapsami."""
+    membership = get_membership(user)
+    if not membership:
+        raise HTTPException(status_code=404, detail="Bir organizasyona bağlı değilsiniz")
+    org_id = membership["organization_id"]
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT id, name FROM facilities WHERE organization_id = %s ORDER BY name", (org_id,))
+    facilities = [{"id": r[0], "name": r[1], "departments": []} for r in cur.fetchall()]
+    by_id = {f["id"]: f for f in facilities}
+
+    if facilities:
+        cur.execute(
+            "SELECT id, facility_id, name FROM departments WHERE facility_id = ANY(%s) ORDER BY name",
+            (list(by_id.keys()),),
+        )
+        for dep_id, fac_id, dep_name in cur.fetchall():
+            by_id[fac_id]["departments"].append({"id": dep_id, "name": dep_name})
+
+    # Cihaz sayilari -- hangi tesis/bolum dolu, gorsel olarak onemli
+    cur.execute("""
+        SELECT d.facility_id, d.department_id, count(*)
+        FROM devices d JOIN facilities f ON f.id = d.facility_id
+        WHERE f.organization_id = %s GROUP BY d.facility_id, d.department_id
+    """, (org_id,))
+    device_counts = [{"facility_id": r[0], "department_id": r[1], "count": r[2]} for r in cur.fetchall()]
+
+    members = []
+    if membership["role"] == "org_admin":
+        cur.execute("""
+            SELECT m.id, m.username, m.role, u.first_name, u.last_name, u.email
+            FROM org_members m JOIN users u ON u.username = m.username
+            WHERE m.organization_id = %s ORDER BY m.role, m.username
+        """, (org_id,))
+        rows = cur.fetchall()
+        for member_id, username, role, first, last, email in rows:
+            cur.execute("SELECT facility_id FROM member_facilities WHERE member_id = %s", (member_id,))
+            fids = [r[0] for r in cur.fetchall()]
+            cur.execute("SELECT department_id FROM member_departments WHERE member_id = %s", (member_id,))
+            dids = [r[0] for r in cur.fetchall()]
+            members.append({
+                "member_id": member_id, "username": username, "role": role,
+                "full_name": " ".join(x for x in [first, last] if x) or None,
+                "email": email, "facility_ids": fids, "department_ids": dids,
+            })
+    cur.close()
+    conn.close()
+
+    return {
+        "organization": {"id": org_id, "name": membership["organization_name"]},
+        "my_role": membership["role"],
+        "my_facility_ids": membership["facility_ids"],
+        "my_department_ids": membership["department_ids"],
+        "facilities": facilities,
+        "device_counts": device_counts,
+        "members": members,
+    }
+
+
+@app.post("/organization/facilities")
+def create_facility(payload: FacilityRequest, user: str = Depends(require_org_admin)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Tesis adı boş olamaz")
+    membership = get_membership(user)
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO facilities (organization_id, name) VALUES (%s, %s) RETURNING id",
+        (membership["organization_id"], name),
+    )
+    facility_id = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return {"id": facility_id, "name": name}
+
+
+@app.delete("/organization/facilities/{facility_id}")
+def delete_facility(facility_id: int, user: str = Depends(require_org_admin)):
+    membership = get_membership(user)
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM facilities WHERE id = %s AND organization_id = %s",
+        (facility_id, membership["organization_id"]),
+    )
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Tesis bulunamadı")
+    # Icinde cihaz varken silmeyi engelle -- cihazlar sahipsiz kalirdi.
+    cur.execute("SELECT count(*) FROM devices WHERE facility_id = %s", (facility_id,))
+    if cur.fetchone()[0] > 0:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Bu tesiste cihazlar var, önce onları taşıyın veya kaldırın")
+    cur.execute("DELETE FROM facilities WHERE id = %s", (facility_id,))
+    cur.close()
+    conn.close()
+    return {"message": "Tesis silindi"}
+
+
+@app.post("/organization/departments")
+def create_department(payload: DepartmentRequest, user: str = Depends(require_org_admin)):
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Bölüm adı boş olamaz")
+    membership = get_membership(user)
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM facilities WHERE id = %s AND organization_id = %s",
+        (payload.facility_id, membership["organization_id"]),
+    )
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Tesis bulunamadı")
+    cur.execute(
+        "INSERT INTO departments (facility_id, name) VALUES (%s, %s) RETURNING id",
+        (payload.facility_id, name),
+    )
+    dep_id = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return {"id": dep_id, "name": name, "facility_id": payload.facility_id}
+
+
+@app.delete("/organization/departments/{department_id}")
+def delete_department(department_id: int, user: str = Depends(require_org_admin)):
+    membership = get_membership(user)
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT 1 FROM departments dep JOIN facilities f ON f.id = dep.facility_id
+        WHERE dep.id = %s AND f.organization_id = %s
+    """, (department_id, membership["organization_id"]))
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Bölüm bulunamadı")
+    # Bolum silinince cihazlar tesise geri duser, sahipsiz kalmaz.
+    cur.execute("UPDATE devices SET department_id = NULL WHERE department_id = %s", (department_id,))
+    cur.execute("DELETE FROM departments WHERE id = %s", (department_id,))
+    cur.close()
+    conn.close()
+    return {"message": "Bölüm silindi"}
+
+
+class MoveDeviceRequest(BaseModel):
+    facility_id: int
+    department_id: int | None = None
+
+
+@app.patch("/devices/{device_id}/location")
+def move_device(device_id: str, payload: MoveDeviceRequest, user: str = Depends(require_org_admin)):
+    """Cihazi baska tesise/bolume tasi."""
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    membership = get_membership(user)
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT 1 FROM facilities WHERE id = %s AND organization_id = %s",
+        (payload.facility_id, membership["organization_id"]),
+    )
+    if not cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Tesis bulunamadı")
+    if payload.department_id is not None and not department_belongs_to(payload.department_id, payload.facility_id):
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Seçilen bölüm bu tesise ait değil")
+    cur.execute(
+        "UPDATE devices SET facility_id = %s, department_id = %s WHERE device_id = %s",
+        (payload.facility_id, payload.department_id, device_id),
+    )
+    cur.close()
+    conn.close()
+    return {"message": "Cihaz taşındı"}
+
+
+@app.patch("/organization/members/{member_id}")
+def update_member(member_id: int, payload: MemberRoleRequest, user: str = Depends(require_org_admin)):
+    if payload.role not in ORG_ROLES:
+        raise HTTPException(status_code=400, detail="Geçersiz rol")
+    membership = get_membership(user)
+    org_id = membership["organization_id"]
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("SELECT username FROM org_members WHERE id = %s AND organization_id = %s", (member_id, org_id))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Üye bulunamadı")
+
+    # Son org_admin kendini dusuremesin -- organizasyon yonetimsiz kalirdi.
+    if row[0] == user and payload.role != "org_admin":
+        cur.execute(
+            "SELECT count(*) FROM org_members WHERE organization_id = %s AND role = 'org_admin'",
+            (org_id,),
+        )
+        if cur.fetchone()[0] <= 1:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=400, detail="Organizasyondaki son yönetici rolünü değiştiremez")
+
+    cur.execute("UPDATE org_members SET role = %s WHERE id = %s", (payload.role, member_id))
+    cur.execute("DELETE FROM member_facilities WHERE member_id = %s", (member_id,))
+    cur.execute("DELETE FROM member_departments WHERE member_id = %s", (member_id,))
+
+    if payload.role == "facility_manager":
+        for fid in payload.facility_ids:
+            cur.execute(
+                "INSERT INTO member_facilities (member_id, facility_id) SELECT %s, id FROM facilities "
+                "WHERE id = %s AND organization_id = %s ON CONFLICT DO NOTHING",
+                (member_id, fid, org_id),
+            )
+    elif payload.role == "department_manager":
+        for did in payload.department_ids:
+            cur.execute(
+                "INSERT INTO member_departments (member_id, department_id) "
+                "SELECT %s, dep.id FROM departments dep JOIN facilities f ON f.id = dep.facility_id "
+                "WHERE dep.id = %s AND f.organization_id = %s ON CONFLICT DO NOTHING",
+                (member_id, did, org_id),
+            )
+
+    cur.close()
+    conn.close()
+    return {"message": "Üye güncellendi"}
+
+
+@app.delete("/organization/members/{member_id}")
+def remove_member(member_id: int, user: str = Depends(require_org_admin)):
+    membership = get_membership(user)
+    org_id = membership["organization_id"]
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("SELECT username, role FROM org_members WHERE id = %s AND organization_id = %s", (member_id, org_id))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Üye bulunamadı")
+    if row[1] == "org_admin":
+        cur.execute("SELECT count(*) FROM org_members WHERE organization_id = %s AND role = 'org_admin'", (org_id,))
+        if cur.fetchone()[0] <= 1:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=400, detail="Organizasyondaki son yönetici çıkarılamaz")
+    cur.execute("DELETE FROM org_members WHERE id = %s", (member_id,))
+    cur.close()
+    conn.close()
+    return {"message": "Üye çıkarıldı"}
+
 
 @app.get("/admin/fleet")
 def admin_fleet(user: str = Depends(require_admin)):
@@ -1102,6 +1523,21 @@ def register(credentials: RegisterRequest, request: Request):
                VALUES (%s, %s, %s, %s, %s, %s, %s, false)""",
             (credentials.username, password_hash, credentials.first_name, credentials.last_name,
              credentials.email, credentials.phone, token),
+        )
+        # Her yeni kullanici kendi organizasyonunun yoneticisi olarak baslar ve
+        # varsayilan bir "Merkez" tesisi alir. Boylece tek cihazli kucuk musteri
+        # hiyerarsiyi hic gormeden calismaya devam eder; cok tesisli musteri ise
+        # ustune tesis/bolum ekler.
+        full_name = " ".join(x for x in [credentials.first_name, credentials.last_name] if x).strip()
+        cur.execute(
+            "INSERT INTO organizations (name) VALUES (%s) RETURNING id",
+            (f"{full_name or credentials.username} Organizasyonu",),
+        )
+        org_id = cur.fetchone()[0]
+        cur.execute("INSERT INTO facilities (organization_id, name) VALUES (%s, 'Merkez')", (org_id,))
+        cur.execute(
+            "INSERT INTO org_members (organization_id, username, role) VALUES (%s, %s, 'org_admin')",
+            (org_id, credentials.username),
         )
     except psycopg2.IntegrityError:
         raise HTTPException(status_code=409, detail="Bu kullanıcı adı, e-posta veya telefon numarası zaten kayıtlı")
