@@ -502,6 +502,355 @@ def trigger_ota(device_id: str, user: str = Depends(require_auth)):
         raise HTTPException(status_code=502, detail="OTA komutu cihaza gönderilemedi")
     return {"message": "OTA güncellemesi tetiklendi", "version": version}
 
+# ---------- Alarm sistemi ----------
+# metric -> (measurement payload alan oneki, birim, insan-okur ad, ondalik basamak)
+ALARM_METRICS = {
+    "voltage":   ("v",   "V",  "Gerilim", 1),
+    "current":   ("i",   "A",  "Akım", 3),
+    "power":     ("p",   "W",  "Aktif Güç", 0),
+    "pf":        ("pf",  "",   "Güç Faktörü", 2),
+    "frequency": ("f",   "Hz", "Frekans", 2),
+    "thd":       ("thd", "%",  "THD (Akım)", 2),
+}
+ALARM_PHASES = {"L1": "1", "L2": "2", "L3": "3"}
+# Esik civarinda salinim yapan degerlerde surekli tetikle/coz dongusune (ve e-posta
+# spamine) girmemek icin, alarm ancak deger esikten %2 uzaklasinca "cozuldu" sayilir.
+ALARM_DEADBAND = 0.02
+
+class AlarmRuleRequest(BaseModel):
+    metric: str
+    phase: str = "any"
+    condition: str = "gt"
+    threshold: float | None = None
+    offline_minutes: int | None = None
+
+
+def alarm_rule_label(metric: str, phase: str, condition: str, threshold, offline_minutes) -> str:
+    if metric == "offline":
+        return f"Cihaz {offline_minutes} dakikadır veri göndermiyor"
+    _, unit, name, digits = ALARM_METRICS[metric]
+    yon = "üstünde" if condition == "gt" else "altında"
+    faz = "herhangi bir faz" if phase == "any" else phase
+    esik = f"{threshold:.{digits}f}".rstrip("0").rstrip(".") if digits else f"{threshold:.0f}"
+    return f"{name} ({faz}) {esik} {unit} {yon}".replace("  ", " ")
+
+
+# Kurallar her canli mesajda (cihaz basina ~2 saniyede bir) degerlendiriliyor; her
+# seferinde DB'ye gitmemek icin kisa omurlu bir onbellek tutuluyor. Kural
+# eklendiginde/silindiginde invalidate_alarm_cache() ile aninda tazeleniyor.
+_alarm_cache = {"rules": {}, "loaded_at": 0.0}
+_alarm_cache_lock = threading.Lock()
+ALARM_CACHE_TTL = 30.0
+
+
+def invalidate_alarm_cache():
+    with _alarm_cache_lock:
+        _alarm_cache["loaded_at"] = 0.0
+
+
+def get_alarm_rules(device_id: str):
+    with _alarm_cache_lock:
+        fresh = (time.time() - _alarm_cache["loaded_at"]) < ALARM_CACHE_TTL
+        if fresh:
+            return _alarm_cache["rules"].get(device_id, [])
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id, device_id, metric, phase, condition, threshold, offline_minutes, is_active
+            FROM alarm_rules WHERE enabled
+        """)
+        by_device = {}
+        for r in cur.fetchall():
+            by_device.setdefault(r[1], []).append({
+                "id": r[0], "device_id": r[1], "metric": r[2], "phase": r[3],
+                "condition": r[4], "threshold": r[5], "offline_minutes": r[6], "is_active": r[7],
+            })
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error("Alarm kurallari yuklenemedi: %s", e)
+        return []
+    with _alarm_cache_lock:
+        _alarm_cache["rules"] = by_device
+        _alarm_cache["loaded_at"] = time.time()
+    return by_device.get(device_id, [])
+
+
+def _set_rule_active(rule_id: int, active: bool):
+    with _alarm_cache_lock:
+        for rules in _alarm_cache["rules"].values():
+            for r in rules:
+                if r["id"] == rule_id:
+                    r["is_active"] = active
+
+
+def alarm_notify(device_id: str, subject: str, body: str):
+    """Cihaz sahibine e-posta gonderir. MQTT dongusunu bloklamamak icin ayri thread'de."""
+    def _send():
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT u.email, d.name FROM devices d
+                JOIN users u ON u.username = d.owner_username
+                WHERE d.device_id = %s
+            """, (device_id,))
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+            if not row or not row[0]:
+                logger.warning("Alarm bildirimi gonderilemedi, e-posta yok: %s", device_id)
+                return
+            email, device_name = row
+            resend.Emails.send({
+                "from": RESEND_FROM,
+                "to": [email],
+                "subject": f"{subject} — {device_name}",
+                "html": (
+                    f"<p><b>{device_name}</b> cihazında alarm durumu:</p>"
+                    f"<p style='font-size:15px'>{body}</p>"
+                    f"<p><a href='{SITE_URL}'>Panoyu aç</a></p>"
+                ),
+            })
+        except Exception as e:
+            logger.error("Alarm e-postasi gonderilemedi (%s): %s", device_id, e)
+
+    threading.Thread(target=_send, daemon=True).start()
+
+
+def _alarm_values(metric: str, phase: str, data: dict):
+    """Canli payload'dan (faz_adi, deger) ciftlerini cikarir."""
+    prefix = ALARM_METRICS[metric][0]
+    phases = ALARM_PHASES.items() if phase == "any" else [(phase, ALARM_PHASES[phase])]
+    out = []
+    for label, idx in phases:
+        value = data.get(f"{prefix}{idx}")
+        if isinstance(value, (int, float)):
+            out.append((label, float(value)))
+    return out
+
+
+def _crosses(condition: str, value: float, threshold: float) -> bool:
+    return value > threshold if condition == "gt" else value < threshold
+
+
+def _recovered(condition: str, value: float, threshold: float) -> bool:
+    band = abs(threshold) * ALARM_DEADBAND or 0.01
+    return value < (threshold - band) if condition == "gt" else value > (threshold + band)
+
+
+def evaluate_alarms(device_id: str, data: dict, cur):
+    """Her canli olcum mesajinda cagrilir; esik asimlarini tetikler/cozer."""
+    for rule in get_alarm_rules(device_id):
+        if rule["metric"] == "offline":
+            continue  # ayri watchdog thread'i tarafindan degerlendiriliyor
+        try:
+            values = _alarm_values(rule["metric"], rule["phase"], data)
+        except KeyError:
+            continue
+        if not values:
+            continue
+
+        threshold = rule["threshold"]
+        breached = [(p, v) for p, v in values if _crosses(rule["condition"], v, threshold)]
+
+        if breached and not rule["is_active"]:
+            phase_label, value = max(breached, key=lambda pv: abs(pv[1] - threshold))
+            _, unit, name, digits = ALARM_METRICS[rule["metric"]]
+            message = (
+                f"{name} ({phase_label}): {value:.{digits}f} {unit} — "
+                f"eşik {threshold:.{digits}f} {unit} {'üstünde' if rule['condition'] == 'gt' else 'altında'}"
+            )
+            cur.execute("""
+                INSERT INTO alarm_events (rule_id, device_id, trigger_value, message)
+                VALUES (%s, %s, %s, %s)
+            """, (rule["id"], device_id, value, message))
+            cur.execute("UPDATE alarm_rules SET is_active = true, last_triggered_at = now() WHERE id = %s", (rule["id"],))
+            _set_rule_active(rule["id"], True)
+            logger.info("ALARM tetiklendi %s: %s", device_id, message)
+            alarm_notify(device_id, "🔴 Alarm", message)
+
+        elif rule["is_active"] and all(_recovered(rule["condition"], v, threshold) for _, v in values):
+            cur.execute("""
+                UPDATE alarm_events SET resolved_at = now()
+                WHERE rule_id = %s AND resolved_at IS NULL
+            """, (rule["id"],))
+            cur.execute("UPDATE alarm_rules SET is_active = false WHERE id = %s", (rule["id"],))
+            _set_rule_active(rule["id"], False)
+            _, unit, name, digits = ALARM_METRICS[rule["metric"]]
+            logger.info("ALARM normale dondu %s: %s", device_id, name)
+            alarm_notify(device_id, "✅ Alarm normale döndü", f"{name} tekrar normal aralıkta.")
+
+
+def alarm_offline_watchdog():
+    """Cihazlarin veri gondermeyi kesip kesmedigini periyodik olarak kontrol eder."""
+    while True:
+        time.sleep(60)
+        try:
+            conn = psycopg2.connect(**DB_CONFIG)
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute("""
+                SELECT r.id, r.device_id, r.offline_minutes, r.is_active,
+                       (SELECT max(time) FROM measurements m WHERE m.device_id = r.device_id)
+                FROM alarm_rules r
+                WHERE r.enabled AND r.metric = 'offline'
+            """)
+            for rule_id, device_id, minutes, is_active, last_seen in cur.fetchall():
+                stale = last_seen is None or (
+                    datetime.now(last_seen.tzinfo) - last_seen
+                ) > timedelta(minutes=minutes)
+
+                if stale and not is_active:
+                    gecen = "hiç veri alınmadı" if last_seen is None else f"son veri: {last_seen:%d.%m.%Y %H:%M}"
+                    message = f"Cihaz {minutes} dakikadır veri göndermiyor ({gecen})"
+                    cur.execute("""
+                        INSERT INTO alarm_events (rule_id, device_id, message) VALUES (%s, %s, %s)
+                    """, (rule_id, device_id, message))
+                    cur.execute("UPDATE alarm_rules SET is_active = true, last_triggered_at = now() WHERE id = %s", (rule_id,))
+                    logger.info("ALARM (cevrimdisi) tetiklendi %s", device_id)
+                    alarm_notify(device_id, "🔴 Cihaz çevrimdışı", message)
+
+                elif not stale and is_active:
+                    cur.execute("UPDATE alarm_events SET resolved_at = now() WHERE rule_id = %s AND resolved_at IS NULL", (rule_id,))
+                    cur.execute("UPDATE alarm_rules SET is_active = false WHERE id = %s", (rule_id,))
+                    logger.info("ALARM (cevrimdisi) cozuldu %s", device_id)
+                    alarm_notify(device_id, "✅ Cihaz tekrar çevrimiçi", "Cihaz yeniden veri göndermeye başladı.")
+
+            invalidate_alarm_cache()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            logger.error("Cevrimdisi alarm kontrolu hatasi: %s", e)
+
+
+@app.get("/devices/{device_id}/alarm-rules")
+def list_alarm_rules(device_id: str, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, metric, phase, condition, threshold, offline_minutes, enabled, is_active, last_triggered_at
+        FROM alarm_rules WHERE device_id = %s ORDER BY id
+    """, (device_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {
+            "id": r[0], "metric": r[1], "phase": r[2], "condition": r[3],
+            "threshold": r[4], "offline_minutes": r[5], "enabled": r[6],
+            "is_active": r[7],
+            "last_triggered_at": r[8].isoformat() if r[8] else None,
+            "label": alarm_rule_label(r[1], r[2], r[3], r[4], r[5]),
+        }
+        for r in rows
+    ]
+
+
+@app.post("/devices/{device_id}/alarm-rules")
+def create_alarm_rule(device_id: str, req: AlarmRuleRequest, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+
+    if req.metric == "offline":
+        if not req.offline_minutes or not (1 <= req.offline_minutes <= 1440):
+            raise HTTPException(status_code=400, detail="Süre 1-1440 dakika arasında olmalı")
+        threshold, offline_minutes = None, req.offline_minutes
+    else:
+        if req.metric not in ALARM_METRICS:
+            raise HTTPException(status_code=400, detail="Geçersiz ölçüm tipi")
+        if req.phase not in ("any", *ALARM_PHASES):
+            raise HTTPException(status_code=400, detail="Geçersiz faz")
+        if req.condition not in ("gt", "lt"):
+            raise HTTPException(status_code=400, detail="Geçersiz koşul")
+        if req.threshold is None:
+            raise HTTPException(status_code=400, detail="Eşik değeri gerekli")
+        threshold, offline_minutes = req.threshold, None
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT count(*) FROM alarm_rules WHERE device_id = %s", (device_id,))
+    if cur.fetchone()[0] >= 20:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Bir cihaz için en fazla 20 alarm kuralı tanımlanabilir")
+    cur.execute("""
+        INSERT INTO alarm_rules (device_id, metric, phase, condition, threshold, offline_minutes)
+        VALUES (%s, %s, %s, %s, %s, %s) RETURNING id
+    """, (device_id, req.metric, req.phase, req.condition, threshold, offline_minutes))
+    rule_id = cur.fetchone()[0]
+    conn.commit()
+    cur.close()
+    conn.close()
+    invalidate_alarm_cache()
+    return {"id": rule_id, "label": alarm_rule_label(req.metric, req.phase, req.condition, threshold, offline_minutes)}
+
+
+@app.patch("/alarm-rules/{rule_id}")
+def update_alarm_rule(rule_id: int, enabled: bool, user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT device_id FROM alarm_rules WHERE id = %s", (rule_id,))
+    row = cur.fetchone()
+    if not row or not is_device_owner(user, row[0]):
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=403, detail="Bu kurala erişiminiz yok")
+    # Kural kapatilirken aktif alarm durumu da sifirlanir, aksi halde tekrar
+    # acildiginda "zaten aktif" sanilip yeni bildirim gonderilmez.
+    cur.execute("UPDATE alarm_rules SET enabled = %s, is_active = false WHERE id = %s", (enabled, rule_id))
+    conn.commit()
+    cur.close()
+    conn.close()
+    invalidate_alarm_cache()
+    return {"message": "Güncellendi"}
+
+
+@app.delete("/alarm-rules/{rule_id}")
+def delete_alarm_rule(rule_id: int, user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT device_id FROM alarm_rules WHERE id = %s", (rule_id,))
+    row = cur.fetchone()
+    if not row or not is_device_owner(user, row[0]):
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=403, detail="Bu kurala erişiminiz yok")
+    cur.execute("DELETE FROM alarm_rules WHERE id = %s", (rule_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
+    invalidate_alarm_cache()
+    return {"message": "Silindi"}
+
+
+@app.get("/devices/{device_id}/alarm-events")
+def list_alarm_events(device_id: str, limit: int = 50, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    limit = max(1, min(limit, 200))
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, rule_id, triggered_at, resolved_at, trigger_value, message
+        FROM alarm_events WHERE device_id = %s ORDER BY triggered_at DESC LIMIT %s
+    """, (device_id, limit))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [
+        {
+            "id": r[0], "rule_id": r[1],
+            "triggered_at": r[2].isoformat() if r[2] else None,
+            "resolved_at": r[3].isoformat() if r[3] else None,
+            "trigger_value": r[4], "message": r[5],
+        }
+        for r in rows
+    ]
+
 class LoginRequest(BaseModel):
     username: str
     password: str
@@ -1106,6 +1455,12 @@ def mqtt_thread():
         # WebSocket istemcilerine push et (ana event loop'a köprü)
         if main_loop:
             asyncio.run_coroutine_threadsafe(broadcast(data, device_id), main_loop)
+        # Alarm kurallarini degerlendir. Hata olursa olcum akisini bozmasin diye
+        # ayri try blogunda -- alarm sistemi cokse bile veri toplama devam etmeli.
+        try:
+            evaluate_alarms(device_id, data, cur)
+        except Exception as e:
+            logger.error("Alarm degerlendirme hatasi (%s): %s", device_id, e)
 
     def handle_energy(device_id: str, data: dict):
         cur.execute("""
@@ -1221,3 +1576,4 @@ async def startup_event():
     global main_loop
     main_loop = asyncio.get_event_loop()
     threading.Thread(target=mqtt_thread, daemon=True).start()
+    threading.Thread(target=alarm_offline_watchdog, daemon=True).start()
