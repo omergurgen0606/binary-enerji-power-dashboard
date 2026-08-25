@@ -873,7 +873,405 @@ function FleetStat({ label, value, color, onClick, active }) {
   );
 }
 
-function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, isAdmin, token, onDeviceAdded }) {
+// ---------- Organizasyon yönetimi ----------
+const ORG_ROLE_LABELS = {
+  org_admin: 'Organizasyon Yöneticisi',
+  facility_manager: 'Tesis Sorumlusu',
+  department_manager: 'Bölüm Sorumlusu',
+};
+
+const ORG_ROLE_HELP = {
+  org_admin: 'Tüm organizasyona erişir, tesis/bölüm ve üye yönetimi yapabilir.',
+  facility_manager: 'Sadece atandığı tesislerin cihazlarını görür ve yönetir.',
+  department_manager: 'Sadece atandığı bölümlerin cihazlarını görür ve yönetir.',
+};
+
+function OrganizationPage({ token, onBack }) {
+  const [org, setOrg] = useState(null);
+  const [error, setError] = useState('');
+  const [newFacility, setNewFacility] = useState('');
+  const [newDepartment, setNewDepartment] = useState({});
+  const [busy, setBusy] = useState(false);
+
+  const headers = { Authorization: `Bearer ${token}` };
+
+  function refresh() {
+    axios.get(`${API_BASE}/organization`, { headers })
+      .then((res) => setOrg(res.data))
+      .catch((err) => setError(err.response?.data?.detail || 'Organizasyon bilgisi alınamadı.'));
+  }
+
+  useEffect(refresh, [token]);
+
+  function deviceCount(facilityId, departmentId) {
+    if (!org) return 0;
+    return org.device_counts
+      .filter((c) => c.facility_id === facilityId && (departmentId === undefined || c.department_id === departmentId))
+      .reduce((sum, c) => sum + c.count, 0);
+  }
+
+  async function call(fn, errText) {
+    setBusy(true);
+    setError('');
+    try {
+      await fn();
+      refresh();
+    } catch (err) {
+      setError(err.response?.data?.detail || errText);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const isOrgAdmin = org?.my_role === 'org_admin';
+
+  return (
+    <div className="centered-page" style={{ maxWidth: 720, padding: '0 24px' }}>
+      <button onClick={onBack} style={{
+        background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+        cursor: 'pointer', padding: 0, marginBottom: 16,
+      }}>
+        ← Cihazlarım
+      </button>
+
+      {error && <div style={{ fontSize: 13, color: 'var(--danger)', marginBottom: 12 }}>{error}</div>}
+      {!org && !error && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>}
+
+      {org && (
+        <>
+          <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700 }}>
+            {org.organization.name}
+          </h1>
+          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>
+            Rolünüz: {ORG_ROLE_LABELS[org.my_role]}
+          </div>
+
+          {/* Tesisler ve bölümler */}
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 20, marginBottom: 16,
+          }}>
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 12 }}>Tesisler ve Bölümler</div>
+
+            {org.facilities.length === 0 && (
+              <div style={{ fontSize: 13, color: 'var(--muted)' }}>Henüz tesis yok.</div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {org.facilities.map((f) => (
+                <div key={f.id} style={{
+                  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{f.name}</span>
+                    <span style={{ fontSize: 11, color: 'var(--muted)' }}>{deviceCount(f.id)} cihaz</span>
+                    {isOrgAdmin && (
+                      <button type="button" disabled={busy} onClick={() => call(
+                        () => axios.delete(`${API_BASE}/organization/facilities/${f.id}`, { headers }),
+                        'Tesis silinemedi.',
+                      )} style={{
+                        background: 'none', border: 'none', color: 'var(--danger)', fontSize: 11,
+                        cursor: 'pointer', textDecoration: 'underline', padding: 0,
+                      }}>Sil</button>
+                    )}
+                  </div>
+
+                  {f.departments.length > 0 && (
+                    <div style={{ marginTop: 10, paddingLeft: 12, borderLeft: '2px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {f.departments.map((dep) => (
+                        <div key={dep.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                          <span style={{ flex: 1 }}>{dep.name}</span>
+                          <span style={{ color: 'var(--muted)', fontSize: 11 }}>{deviceCount(f.id, dep.id)} cihaz</span>
+                          {isOrgAdmin && (
+                            <button type="button" disabled={busy} onClick={() => call(
+                              () => axios.delete(`${API_BASE}/organization/departments/${dep.id}`, { headers }),
+                              'Bölüm silinemedi.',
+                            )} style={{
+                              background: 'none', border: 'none', color: 'var(--danger)', fontSize: 11,
+                              cursor: 'pointer', textDecoration: 'underline', padding: 0,
+                            }}>Sil</button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {isOrgAdmin && (
+                    <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                      <input
+                        placeholder="Yeni bölüm adı"
+                        value={newDepartment[f.id] || ''}
+                        onChange={(e) => setNewDepartment({ ...newDepartment, [f.id]: e.target.value })}
+                        style={{ ...inputStyle, fontSize: 12, padding: '6px 10px' }}
+                      />
+                      <button
+                        type="button"
+                        disabled={busy || !(newDepartment[f.id] || '').trim()}
+                        onClick={() => call(async () => {
+                          await axios.post(`${API_BASE}/organization/departments`,
+                            { facility_id: f.id, name: newDepartment[f.id].trim() }, { headers });
+                          setNewDepartment({ ...newDepartment, [f.id]: '' });
+                        }, 'Bölüm eklenemedi.')}
+                        style={{
+                          padding: '6px 12px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+                          background: 'var(--bg)', color: 'var(--ink)', fontSize: 12, fontWeight: 600,
+                          cursor: 'pointer', whiteSpace: 'nowrap',
+                        }}
+                      >
+                        Bölüm Ekle
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {isOrgAdmin && (
+              <div style={{ display: 'flex', gap: 6, marginTop: 14 }}>
+                <input
+                  placeholder="Yeni tesis adı"
+                  value={newFacility}
+                  onChange={(e) => setNewFacility(e.target.value)}
+                  style={{ ...inputStyle, fontSize: 13 }}
+                />
+                <button
+                  type="button"
+                  disabled={busy || !newFacility.trim()}
+                  onClick={() => call(async () => {
+                    await axios.post(`${API_BASE}/organization/facilities`, { name: newFacility.trim() }, { headers });
+                    setNewFacility('');
+                  }, 'Tesis eklenemedi.')}
+                  style={{
+                    padding: '8px 14px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+                    background: 'var(--bg)', color: 'var(--ink)', fontSize: 13, fontWeight: 600,
+                    cursor: 'pointer', whiteSpace: 'nowrap',
+                  }}
+                >
+                  Tesis Ekle
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Üyeler */}
+          {isOrgAdmin && (
+            <div style={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', padding: 20,
+            }}>
+              <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>Üyeler</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
+                Rol, üyenin hangi cihazları göreceğini belirler.
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {org.members.map((m) => (
+                  <MemberRow
+                    key={m.member_id} member={m} org={org} headers={headers}
+                    busy={busy} onChanged={refresh} onError={setError}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+      <Footer />
+    </div>
+  );
+}
+
+function MemberRow({ member, org, headers, busy, onChanged, onError }) {
+  const [editing, setEditing] = useState(false);
+  const [role, setRole] = useState(member.role);
+  const [facilityIds, setFacilityIds] = useState(member.facility_ids);
+  const [departmentIds, setDepartmentIds] = useState(member.department_ids);
+  const [saving, setSaving] = useState(false);
+
+  const allDepartments = org.facilities.flatMap((f) =>
+    f.departments.map((d) => ({ ...d, facilityName: f.name })));
+
+  const scopeSummary = member.role === 'org_admin'
+    ? 'Tüm organizasyon'
+    : member.role === 'facility_manager'
+      ? (member.facility_ids.length
+        ? org.facilities.filter((f) => member.facility_ids.includes(f.id)).map((f) => f.name).join(', ')
+        : 'Henüz tesis atanmadı')
+      : (member.department_ids.length
+        ? allDepartments.filter((d) => member.department_ids.includes(d.id)).map((d) => d.name).join(', ')
+        : 'Henüz bölüm atanmadı');
+
+  async function save() {
+    setSaving(true);
+    try {
+      await axios.patch(`${API_BASE}/organization/members/${member.member_id}`, {
+        role, facility_ids: facilityIds, department_ids: departmentIds,
+      }, { headers });
+      setEditing(false);
+      onChanged();
+    } catch (err) {
+      onError(err.response?.data?.detail || 'Üye güncellenemedi.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function toggle(list, setList, id) {
+    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  }
+
+  return (
+    <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 12 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ flex: 1, minWidth: 160 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{member.full_name || member.username}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{member.email || member.username}</div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontSize: 12 }}>{ORG_ROLE_LABELS[member.role]}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{scopeSummary}</div>
+        </div>
+        <button type="button" onClick={() => setEditing((e) => !e)} style={{
+          background: 'none', border: 'none', color: 'var(--accent)', fontSize: 11,
+          cursor: 'pointer', textDecoration: 'underline', padding: 0,
+        }}>
+          {editing ? 'Vazgeç' : 'Düzenle'}
+        </button>
+      </div>
+
+      {editing && (
+        <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <select value={role} onChange={(e) => setRole(e.target.value)}
+            style={{ ...inputStyle, fontSize: 13, padding: '8px 10px' }}>
+            {Object.entries(ORG_ROLE_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{ORG_ROLE_HELP[role]}</div>
+
+          {role === 'facility_manager' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {org.facilities.map((f) => (
+                <label key={f.id} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="checkbox" checked={facilityIds.includes(f.id)}
+                    onChange={() => toggle(facilityIds, setFacilityIds, f.id)} />
+                  {f.name}
+                </label>
+              ))}
+            </div>
+          )}
+
+          {role === 'department_manager' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+              {allDepartments.length === 0 && (
+                <div style={{ fontSize: 11, color: 'var(--muted)' }}>Önce bir tesise bölüm ekleyin.</div>
+              )}
+              {allDepartments.map((d) => (
+                <label key={d.id} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="checkbox" checked={departmentIds.includes(d.id)}
+                    onChange={() => toggle(departmentIds, setDepartmentIds, d.id)} />
+                  {d.facilityName} · {d.name}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" disabled={saving || busy} onClick={save} style={{
+              padding: '6px 14px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+              background: 'var(--bg)', color: 'var(--ink)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}>
+              {saving ? 'Kaydediliyor…' : 'Kaydet'}
+            </button>
+            <button type="button" disabled={saving} onClick={async () => {
+              if (!window.confirm(`${member.username} organizasyondan çıkarılsın mı?`)) return;
+              try {
+                await axios.delete(`${API_BASE}/organization/members/${member.member_id}`, { headers });
+                onChanged();
+              } catch (err) {
+                onError(err.response?.data?.detail || 'Üye çıkarılamadı.');
+              }
+            }} style={{
+              padding: '6px 14px', borderRadius: 'var(--radius-xs)', border: 'none',
+              background: 'none', color: 'var(--danger)', fontSize: 12, cursor: 'pointer',
+            }}>
+              Organizasyondan Çıkar
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Cihazları Tesis → Bölüm kırılımıyla gösterir. Tek tesisli ve bölümsüz
+// (küçük müşteri) durumda hiyerarşi hiç gösterilmez, düz liste olarak kalır —
+// böylece tek cihazlı kullanıcı bu yapıyı hiç görmez.
+function DeviceRow({ device, onSelect }) {
+  return (
+    <button
+      onClick={() => onSelect(device)}
+      className="device-row"
+      style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        padding: '14px 16px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+        background: 'var(--bg)', cursor: 'pointer', fontSize: 14, fontWeight: 600,
+        color: 'var(--ink)', textAlign: 'left', width: '100%',
+      }}
+    >
+      {device.name}
+      <span style={{ color: 'var(--muted)', fontWeight: 400 }}>İzle →</span>
+    </button>
+  );
+}
+
+function DeviceGroups({ devices, onSelect }) {
+  const facilities = [...new Set(devices.map((d) => d.facility_name).filter(Boolean))];
+  const hasDepartments = devices.some((d) => d.department_name);
+  const flat = facilities.length <= 1 && !hasDepartments;
+
+  if (flat) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        {devices.map((d) => <DeviceRow key={d.device_id} device={d} onSelect={onSelect} />)}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {facilities.map((facility) => {
+        const inFacility = devices.filter((d) => d.facility_name === facility);
+        const departments = [...new Set(inFacility.map((d) => d.department_name).filter(Boolean))];
+        const unassigned = inFacility.filter((d) => !d.department_name);
+        return (
+          <div key={facility}>
+            <div style={{
+              fontSize: 11, fontWeight: 700, letterSpacing: 0.6, textTransform: 'uppercase',
+              color: 'var(--muted)', marginBottom: 8,
+            }}>
+              {facility}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {unassigned.map((d) => <DeviceRow key={d.device_id} device={d} onSelect={onSelect} />)}
+              {departments.map((dep) => (
+                <div key={dep} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', paddingLeft: 2 }}>{dep}</div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 10, borderLeft: '2px solid var(--border)' }}>
+                    {inFacility.filter((d) => d.department_name === dep).map((d) => (
+                      <DeviceRow key={d.device_id} device={d} onSelect={onSelect} />
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, onOpenOrganization, isAdmin, token, onDeviceAdded }) {
   const [showAddForm, setShowAddForm] = useState(devices.length === 0);
 
   return (
@@ -887,6 +1285,12 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, i
             Cihaz Filosu
           </button>
         )}
+        <button onClick={onOpenOrganization} style={{
+          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+          cursor: 'pointer', padding: 4, textDecoration: 'underline',
+        }}>
+          Organizasyon
+        </button>
         <button onClick={onOpenAccount} style={{
           background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
           cursor: 'pointer', padding: 4, textDecoration: 'underline',
@@ -906,26 +1310,7 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, i
             Hesabınıza bağlı bir cihaz bulunmuyor.
           </div>
         )}
-        {devices.length > 0 && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {devices.map((d) => (
-              <button
-                key={d.device_id}
-                onClick={() => onSelect(d)}
-                className="device-row"
-                style={{
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '14px 16px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
-                  background: 'var(--bg)', cursor: 'pointer', fontSize: 14, fontWeight: 600,
-                  color: 'var(--ink)', textAlign: 'left',
-                }}
-              >
-                {d.name}
-                <span style={{ color: 'var(--muted)', fontWeight: 400 }}>İzle →</span>
-              </button>
-            ))}
-          </div>
-        )}
+        {devices.length > 0 && <DeviceGroups devices={devices} onSelect={onSelect} />}
         {showAddForm ? (
           <AddDeviceForm
             token={token}
@@ -2661,6 +3046,7 @@ export default function App() {
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
   const [showFleet, setShowFleet] = useState(false);
+  const [showOrganization, setShowOrganization] = useState(false);
   const [role, setRole] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || 'klasik');
 
@@ -2680,6 +3066,7 @@ export default function App() {
     setDevices(null);
     setSelectedDevice(null);
     setShowFleet(false);
+    setShowOrganization(false);
     setRole(null);
   }
 
@@ -2718,6 +3105,10 @@ export default function App() {
 
   if (showFleet) {
     return <FleetPage token={token} onBack={() => setShowFleet(false)} />;
+  }
+
+  if (showOrganization) {
+    return <OrganizationPage token={token} onBack={() => setShowOrganization(false)} />;
   }
 
   if (showAccount) {
@@ -2759,6 +3150,7 @@ export default function App() {
         onLogout={handleLogout}
         onOpenAccount={() => setShowAccount(true)}
         onOpenFleet={() => setShowFleet(true)}
+        onOpenOrganization={() => setShowOrganization(true)}
         isAdmin={role === 'admin'}
         token={token}
         onDeviceAdded={refreshDevices}
