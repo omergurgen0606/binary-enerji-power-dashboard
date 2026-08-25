@@ -1379,6 +1379,232 @@ function DeviceInfoSection({ info }) {
   );
 }
 
+// ---------- Alarmlar ----------
+// backend'deki ALARM_METRICS ile birebir aynı (bkz. api.py)
+const ALARM_METRIC_LIST = [
+  { key: 'voltage', label: 'Gerilim', unit: 'V', step: '0.1', placeholder: '250' },
+  { key: 'current', label: 'Akım', unit: 'A', step: '0.001', placeholder: '100' },
+  { key: 'power', label: 'Aktif Güç', unit: 'W', step: '1', placeholder: '20000' },
+  { key: 'pf', label: 'Güç Faktörü', unit: '', step: '0.01', placeholder: '0.90' },
+  { key: 'frequency', label: 'Frekans', unit: 'Hz', step: '0.01', placeholder: '49.5' },
+  { key: 'thd', label: 'THD (Akım)', unit: '%', step: '0.1', placeholder: '8' },
+  { key: 'offline', label: 'Cihaz çevrimdışı', unit: 'dakika', step: '1', placeholder: '15' },
+];
+
+function formatAlarmTime(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleString('tr-TR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+function AlarmsSection({ token, device }) {
+  const [rules, setRules] = useState(null);
+  const [events, setEvents] = useState([]);
+  const [adding, setAdding] = useState(false);
+  const [metric, setMetric] = useState('voltage');
+  const [phase, setPhase] = useState('any');
+  const [condition, setCondition] = useState('gt');
+  const [value, setValue] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState(null);
+
+  const headers = { Authorization: `Bearer ${token}` };
+  const isOffline = metric === 'offline';
+  const metricDef = ALARM_METRIC_LIST.find((m) => m.key === metric);
+
+  function refresh() {
+    axios.get(`${API_BASE}/devices/${device.device_id}/alarm-rules`, { headers })
+      .then((res) => setRules(res.data)).catch(() => setRules([]));
+    axios.get(`${API_BASE}/devices/${device.device_id}/alarm-events?limit=20`, { headers })
+      .then((res) => setEvents(res.data)).catch(() => {});
+  }
+
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, 30000);
+    return () => clearInterval(timer);
+  }, [device.device_id]);
+
+  async function addRule() {
+    setBusy(true);
+    setToast(null);
+    try {
+      const body = isOffline
+        ? { metric: 'offline', offline_minutes: Number(value) }
+        : { metric, phase, condition, threshold: Number(value) };
+      await axios.post(`${API_BASE}/devices/${device.device_id}/alarm-rules`, body, { headers });
+      setValue('');
+      setAdding(false);
+      refresh();
+    } catch (err) {
+      setToast({ ok: false, text: err.response?.data?.detail || 'Alarm eklenemedi.' });
+    } finally {
+      setBusy(false);
+      setTimeout(() => setToast(null), 5000);
+    }
+  }
+
+  async function toggleRule(rule) {
+    try {
+      await axios.patch(`${API_BASE}/alarm-rules/${rule.id}?enabled=${!rule.enabled}`, {}, { headers });
+      refresh();
+    } catch {
+      setToast({ ok: false, text: 'Güncellenemedi.' });
+    }
+  }
+
+  async function deleteRule(rule) {
+    if (!window.confirm(`"${rule.label}" alarmı silinsin mi?`)) return;
+    try {
+      await axios.delete(`${API_BASE}/alarm-rules/${rule.id}`, { headers });
+      refresh();
+    } catch {
+      setToast({ ok: false, text: 'Silinemedi.' });
+    }
+  }
+
+  const activeCount = (rules || []).filter((r) => r.is_active).length;
+
+  return (
+    <SectionCard
+      title="Alarmlar"
+      right={activeCount > 0 ? (
+        <span style={{
+          fontSize: 11, fontWeight: 700, color: '#fff', background: 'var(--danger)',
+          padding: '3px 9px', borderRadius: 100,
+        }}>
+          {activeCount} aktif
+        </span>
+      ) : null}
+    >
+      {rules === null ? (
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>
+      ) : rules.length === 0 ? (
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+          Henüz alarm tanımlanmadı. Eşik aşımı veya cihazın veri göndermeyi kesmesi durumunda
+          e-posta ile uyarı almak için alarm ekleyin.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {rules.map((rule) => (
+            <div key={rule.id} style={{
+              display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+              padding: '9px 12px', borderRadius: 'var(--radius-sm)',
+              border: `1px solid ${rule.is_active ? 'var(--danger)' : 'var(--border)'}`,
+              background: rule.is_active ? 'color-mix(in srgb, var(--danger) 8%, var(--surface))' : 'transparent',
+              opacity: rule.enabled ? 1 : 0.55,
+            }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                background: rule.is_active ? 'var(--danger)' : (rule.enabled ? 'var(--l2)' : 'var(--muted)'),
+              }} />
+              <span style={{ fontSize: 13, flex: 1, minWidth: 180 }}>{rule.label}</span>
+              {rule.is_active && (
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--danger)' }}>ŞU AN AKTİF</span>
+              )}
+              <button type="button" onClick={() => toggleRule(rule)} style={{
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 11,
+                color: 'var(--muted)', textDecoration: 'underline', padding: 0,
+              }}>
+                {rule.enabled ? 'Duraklat' : 'Etkinleştir'}
+              </button>
+              <button type="button" onClick={() => deleteRule(rule)} style={{
+                background: 'none', border: 'none', cursor: 'pointer', fontSize: 11,
+                color: 'var(--danger)', textDecoration: 'underline', padding: 0,
+              }}>
+                Sil
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {adding ? (
+        <div style={{
+          marginTop: 12, padding: 12, borderRadius: 'var(--radius-sm)',
+          border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8,
+        }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <select value={metric} onChange={(e) => setMetric(e.target.value)}
+              style={{ ...inputStyle, width: 'auto', padding: '6px 10px', fontSize: 13 }}>
+              {ALARM_METRIC_LIST.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+            {!isOffline && (
+              <>
+                <select value={phase} onChange={(e) => setPhase(e.target.value)}
+                  style={{ ...inputStyle, width: 'auto', padding: '6px 10px', fontSize: 13 }}>
+                  <option value="any">Herhangi bir faz</option>
+                  <option value="L1">L1</option>
+                  <option value="L2">L2</option>
+                  <option value="L3">L3</option>
+                </select>
+                <select value={condition} onChange={(e) => setCondition(e.target.value)}
+                  style={{ ...inputStyle, width: 'auto', padding: '6px 10px', fontSize: 13 }}>
+                  <option value="gt">üstünde</option>
+                  <option value="lt">altında</option>
+                </select>
+              </>
+            )}
+            <input
+              type="number" step={metricDef?.step} value={value}
+              placeholder={metricDef?.placeholder}
+              onChange={(e) => setValue(e.target.value)}
+              style={{ ...inputStyle, width: 110, padding: '6px 10px', fontSize: 13 }}
+            />
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>{metricDef?.unit}</span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" disabled={busy || value === ''} onClick={addRule} style={{
+              padding: '6px 14px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+              background: 'var(--bg)', color: 'var(--ink)', fontSize: 12, fontWeight: 600,
+              cursor: (busy || value === '') ? 'default' : 'pointer', opacity: (busy || value === '') ? 0.5 : 1,
+            }}>
+              {busy ? 'Ekleniyor…' : 'Alarmı Ekle'}
+            </button>
+            <button type="button" onClick={() => { setAdding(false); setValue(''); }} style={{
+              padding: '6px 14px', borderRadius: 'var(--radius-xs)', border: 'none',
+              background: 'none', color: 'var(--muted)', fontSize: 12, cursor: 'pointer',
+            }}>
+              Vazgeç
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAdding(true)} style={{
+          marginTop: 12, padding: '6px 14px', borderRadius: 'var(--radius-xs)',
+          border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--ink)',
+          fontSize: 12, fontWeight: 600, cursor: 'pointer', width: 'fit-content',
+        }}>
+          + Alarm Ekle
+        </button>
+      )}
+
+      {toast && (
+        <div style={{ fontSize: 11, marginTop: 8, color: toast.ok ? 'var(--l2)' : 'var(--danger)' }}>{toast.text}</div>
+      )}
+
+      {events.length > 0 && (
+        <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>Son Alarmlar</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
+            {events.map((ev) => (
+              <div key={ev.id} style={{ display: 'flex', gap: 10, fontSize: 12, flexWrap: 'wrap' }}>
+                <span className="mono" style={{ color: 'var(--muted)', minWidth: 96 }}>
+                  {formatAlarmTime(ev.triggered_at)}
+                </span>
+                <span style={{ flex: 1, minWidth: 200 }}>{ev.message}</span>
+                <span style={{ fontSize: 11, color: ev.resolved_at ? 'var(--l2)' : 'var(--danger)', fontWeight: 600 }}>
+                  {ev.resolved_at ? `çözüldü ${formatAlarmTime(ev.resolved_at)}` : 'devam ediyor'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 // ---------- Cihaz Ayarları: yazma komutları ----------
 const DEVICE_COMMAND_LIST = [
   { key: 'reset_energy', label: 'Enerji Sayaçlarını Sıfırla', risk: 'low' },
@@ -2006,6 +2232,7 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
       <PeaksSection peaks={peaks} />
       <DemandSection demand={demand} />
       <HarmonicsSection harmonics={harmonics} />
+      <AlarmsSection token={token} device={device} />
       <DeviceInfoSection info={deviceInfo} />
 
       <div style={{
