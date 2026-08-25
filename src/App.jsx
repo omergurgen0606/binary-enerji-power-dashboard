@@ -1095,6 +1095,75 @@ function StatsBlock({ title, data, suffix, theme }) {
   );
 }
 
+const TREND_RANGES = [['7', '7 Gün'], ['30', '30 Gün'], ['90', '90 Gün']];
+
+function aggregateDaily(rows) {
+  const byDay = {};
+  for (const row of rows) {
+    if (!row.reading_time) continue;
+    const day = row.reading_time.slice(0, 10);
+    if (!byDay[day]) byDay[day] = { day, tuketim: 0, uretim: 0 };
+    byDay[day].tuketim += Math.max(0, row.delta_active_tuketim || 0) / 1000;
+    byDay[day].uretim += Math.max(0, row.delta_active_uretim || 0) / 1000;
+  }
+  return Object.values(byDay)
+    .sort((a, b) => a.day.localeCompare(b.day))
+    .map((d) => {
+      const [, m, dd] = d.day.split('-');
+      return { ...d, label: `${dd}.${m}`, tuketim: Math.round(d.tuketim * 100) / 100, uretim: Math.round(d.uretim * 100) / 100 };
+    });
+}
+
+function TrendSection({ token, device }) {
+  const [range, setRange] = useState('7');
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    setError('');
+    axios.get(`${API_BASE}/energy/hourly?device_id=${device.device_id}&days=${range}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => { if (!cancelled) setRows(res.data); })
+      .catch(() => { if (!cancelled) setError('Trend verileri yüklenemedi.'); });
+    return () => { cancelled = true; };
+  }, [device.device_id, range, token]);
+
+  const chartData = rows ? aggregateDaily(rows) : [];
+  const totalTuketim = chartData.reduce((s, d) => s + d.tuketim, 0);
+  const totalUretim = chartData.reduce((s, d) => s + d.uretim, 0);
+
+  return (
+    <SectionCard title="Enerji Trendi" right={<TabToggle options={TREND_RANGES} value={range} onChange={setRange} />}>
+      {error && <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>}
+      {!error && rows === null && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>}
+      {!error && rows !== null && chartData.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>Bu aralıkta henüz veri yok.</div>
+      )}
+      {!error && chartData.length > 0 && (
+        <>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--muted)' }} />
+              <YAxis tick={{ fontSize: 10, fill: 'var(--muted)' }} width={40} />
+              <Tooltip formatter={(val) => `${val} kWh`} contentStyle={{ fontSize: 12, borderRadius: 8 }} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="tuketim" name="Tüketim" fill="var(--l1)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="uretim" name="Üretim" fill="var(--l2)" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+          <div style={{ display: 'flex', gap: 24, marginTop: 12, fontSize: 12, color: 'var(--muted)' }}>
+            <span>Toplam Tüketim: <b className="mono" style={{ color: 'var(--ink)' }}>{totalTuketim.toFixed(1)} kWh</b></span>
+            <span>Toplam Üretim: <b className="mono" style={{ color: 'var(--ink)' }}>{totalUretim.toFixed(1)} kWh</b></span>
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
 function StatsSection({ stats, theme }) {
   if (!stats) return null;
   return (
@@ -1932,6 +2001,7 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
         <EnergyCard title="Üretim" data={energy} suffix="uretim" onClick={() => setHourlyModal({ title: 'Üretim', suffix: 'uretim' })} />
       </div>
 
+      <TrendSection token={token} device={device} />
       <StatsSection stats={stats} theme={theme} />
       <PeaksSection peaks={peaks} />
       <DemandSection demand={demand} />
