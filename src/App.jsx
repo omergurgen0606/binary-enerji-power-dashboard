@@ -1995,7 +1995,9 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
 function Footer() {
   return (
     <footer style={{ textAlign: 'center', padding: '32px 16px 20px', fontSize: 12, color: 'var(--muted)' }}>
-      © {new Date().getFullYear()} Binary Enerji · <a href="/gizlilik-politikasi" style={{ color: 'var(--muted)' }}>Gizlilik Politikası</a>
+      © {new Date().getFullYear()} Binary Enerji ·{' '}
+      <a href="/gizlilik-politikasi" style={{ color: 'var(--muted)' }}>Gizlilik Politikası</a> ·{' '}
+      <a href="/kullanim-sartlari" style={{ color: 'var(--muted)' }}>Kullanım Şartları</a>
     </footer>
   );
 }
@@ -2034,9 +2036,67 @@ function PrivacyPolicy() {
   );
 }
 
+function TermsOfService() {
+  return (
+    <div className="centered-page" style={{ maxWidth: 640, padding: '0 24px' }}>
+      <a href="/" style={{ fontSize: 12, color: 'var(--muted)', textDecoration: 'none' }}>← Binary Enerji'ye dön</a>
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: "var(--radius-md)", padding: 32, marginTop: 16, lineHeight: 1.7, fontSize: 14,
+      }}>
+        <h1 style={{ fontSize: 20, marginTop: 0 }}>Kullanım Şartları</h1>
+        <p style={{ color: 'var(--muted)', fontSize: 12 }}>Son güncelleme: 25 Ağustos 2026</p>
+
+        <h2 style={{ fontSize: 15 }}>1. Taraflar ve Kabul</h2>
+        <p>Bu Kullanım Şartları ("Şartlar"), Binary Enerji tarafından sunulan web panosu, mobil uygulamalar (iOS/Android) ve bunlarla birlikte çalışan ölçüm cihazlarından ("Hizmet") faydalanan kullanıcıyı ("Kullanıcı", "siz") bağlar. Hesap oluşturarak veya Hizmeti kullanarak bu Şartları kabul etmiş sayılırsınız. Kabul etmiyorsanız Hizmeti kullanmamalısınız.</p>
+
+        <h2 style={{ fontSize: 15 }}>2. Hizmetin Tanımı</h2>
+        <p>Binary Enerji, elektrik panolarına bağlanan donanım cihazlarından (gerilim, akım, güç, enerji tüketimi vb.) toplanan ölçüm verilerini kullanıcıya web ve mobil uygulamalar üzerinden gösteren bir izleme hizmetidir. Hizmet; cihaz yönetimi, canlı veri görüntüleme, geçmiş veri raporlama ve cihaza uzaktan komut/güncelleme gönderme gibi işlevleri içerir.</p>
+
+        <h2 style={{ fontSize: 15 }}>3. Güvenlik Cihazı Değildir</h2>
+        <p>Hizmet yalnızca <strong>izleme ve bilgilendirme</strong> amaçlıdır; bir koruma, alarm veya güvenlik sistemi olarak tasarlanmamıştır. Elektrik tesisatınızın güvenliği, sigortalanması ve yürürlükteki elektrik güvenliği mevzuatına uygunluğu tamamen sizin ve/veya yetkili bir elektrikçinin sorumluluğundadır. Binary Enerji, Hizmet üzerinden gelen (veya geciken/gelmeyen) veri veya bildirimlere dayanılarak alınan kararlardan doğacak maddi/bedeni zararlardan sorumlu tutulamaz.</p>
+
+        <h2 style={{ fontSize: 15 }}>4. Hesap Sorumluluğu</h2>
+        <p>Hesap bilgilerinizin (kullanıcı adı, şifre) gizliliğinden ve hesabınız üzerinden gerçekleştirilen tüm işlemlerden siz sorumlusunuz. Şüpheli bir erişim fark ederseniz derhal bize bildirmelisiniz. Doğru ve güncel bilgi vermek Kullanıcı'nın yükümlülüğündedir.</p>
+
+        <h2 style={{ fontSize: 15 }}>5. Kabul Edilebilir Kullanım</h2>
+        <p>Hizmeti yalnızca yasal amaçlarla ve size ait veya kullanma yetkiniz olan cihazlar için kullanabilirsiniz. Hizmete yetkisiz erişim sağlamak, güvenlik önlemlerini aşmaya çalışmak, başka kullanıcıların cihazlarına izinsiz erişmeye çalışmak veya Hizmeti kötüye kullanmak yasaktır. Özellikle "Fabrika Ayarlarına Dön" ve "Sistem Şifresini Sıfırla" gibi geri alınamaz cihaz komutları kendi sorumluluğunuzdadır.</p>
+
+        <h2 style={{ fontSize: 15 }}>6. Hizmetin Sürekliliği</h2>
+        <p>Hizmetin kesintisiz veya hatasız çalışacağı garanti edilmez. Bakım, güncelleme, internet/altyapı sorunları veya mücbir sebepler nedeniyle Hizmet geçici olarak kullanılamayabilir. Binary Enerji, makul çaba göstererek Hizmeti sürdürmeyi hedefler ancak kesinti süresine ilişkin bir taahhütte bulunmaz.</p>
+
+        <h2 style={{ fontSize: 15 }}>7. Kablosuz Firmware Güncellemeleri (OTA)</h2>
+        <p>Kullanıcı, cihazına kablosuz olarak firmware güncellemesi ("Güncelle" butonu) gönderebilir. Güncelleme sırasında cihaz kısa süreliğine yeniden başlar ve bu sürede ölçüm/komut işlevleri kesintiye uğrayabilir. Güncellemenin bir ağ kesintisi veya beklenmeyen bir donanım arızası nedeniyle tamamlanamaması riski bulunur; Binary Enerji makul güvenlik önlemlerini (otomatik geri alma dahil) uygular ancak sıfır risk taahhüt etmez.</p>
+
+        <h2 style={{ fontSize: 15 }}>8. Fikri Mülkiyet</h2>
+        <p>Hizmete ait yazılım, tasarım, marka ve içerikler Binary Enerji'ye veya lisans verenlerine aittir. Bu Şartlar size Hizmeti kullanmanız için sınırlı, münhasır olmayan, devredilemez bir kullanım hakkı tanır; başka bir mülkiyet hakkı vermez.</p>
+
+        <h2 style={{ fontSize: 15 }}>9. Sorumluluğun Sınırlandırılması</h2>
+        <p>Yürürlükteki mevzuatın izin verdiği azami ölçüde, Binary Enerji; Hizmetin kullanımından veya kullanılamamasından doğan dolaylı, arızi veya sonuç niteliğindeki zararlardan (kar kaybı, veri kaybı, iş kaybı dahil) sorumlu tutulamaz. Bu Şartlar tüketici hukukundan doğan vazgeçilemez haklarınızı sınırlamaz.</p>
+
+        <h2 style={{ fontSize: 15 }}>10. Fesih</h2>
+        <p>Hesabınızı istediğiniz zaman kapatabilirsiniz. Binary Enerji, bu Şartların ihlali halinde hesabınızı askıya alma veya sonlandırma hakkını saklı tutar.</p>
+
+        <h2 style={{ fontSize: 15 }}>11. Değişiklikler</h2>
+        <p>Bu Şartlar zaman zaman güncellenebilir. Önemli değişiklikler Hizmet üzerinden veya e-posta yoluyla duyurulur. Güncellemeden sonra Hizmeti kullanmaya devam etmeniz, yeni Şartları kabul ettiğiniz anlamına gelir.</p>
+
+        <h2 style={{ fontSize: 15 }}>12. Uygulanacak Hukuk</h2>
+        <p>Bu Şartlar Türkiye Cumhuriyeti kanunlarına tabidir. Bu Şartlardan doğan uyuşmazlıklarda Türkiye mahkemeleri ve icra daireleri yetkilidir.</p>
+
+        <h2 style={{ fontSize: 15 }}>13. İletişim</h2>
+        <p>Sorularınız için hesabınızla ilişkili e-posta adresi üzerinden bize ulaşabilirsiniz.</p>
+      </div>
+      <Footer />
+    </div>
+  );
+}
+
 export default function App() {
   if (typeof window !== 'undefined' && window.location.pathname === '/gizlilik-politikasi') {
     return <PrivacyPolicy />;
+  }
+  if (typeof window !== 'undefined' && window.location.pathname === '/kullanim-sartlari') {
+    return <TermsOfService />;
   }
 
   const [token, setToken] = useState(() => localStorage.getItem('token'));
