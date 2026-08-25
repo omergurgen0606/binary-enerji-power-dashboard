@@ -512,6 +512,10 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
+              <EmailChangeForm token={token} currentEmail={profile.email} />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
               <PasswordChangeForm token={token} />
             </div>
 
@@ -535,6 +539,79 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
         </div>
         <ThemePicker theme={theme} onChange={onThemeChange} />
       </div>
+    </div>
+  );
+}
+
+function EmailChangeForm({ token, currentEmail }) {
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  async function submit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setMessage(null);
+    try {
+      const res = await axios.post(`${API_BASE}/me/email`, { email, password }, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setMessage({ ok: true, text: res.data.message });
+      setEmail('');
+      setPassword('');
+    } catch (err) {
+      setMessage({ ok: false, text: err.response?.data?.detail || 'E-posta güncellenemedi.' });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>E-posta Adresi</div>
+        <button type="button" onClick={() => setOpen((o) => !o)} style={{
+          background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12,
+          cursor: 'pointer', textDecoration: 'underline', padding: 0,
+        }}>
+          {open ? 'Vazgeç' : (currentEmail ? 'Değiştir' : 'Ekle')}
+        </button>
+      </div>
+      {!currentEmail && !open && (
+        <div style={{ fontSize: 11, color: 'var(--danger)', marginTop: 6 }}>
+          Hesabınızda e-posta adresi kayıtlı değil — alarm bildirimleri gönderilemez.
+        </div>
+      )}
+      {open && (
+        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 12 }}>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+            Yeni adrese bir doğrulama bağlantısı gönderilir; siz onaylayana kadar hesabınızın
+            e-postası değişmez.
+          </span>
+          <input
+            type="email" placeholder="yeni@eposta.com" value={email} required
+            onChange={(e) => setEmail(e.target.value)} style={inputStyle}
+          />
+          <input
+            type="password" placeholder="Mevcut şifreniz" value={password} required
+            onChange={(e) => setPassword(e.target.value)} style={inputStyle}
+          />
+          <button type="submit" disabled={loading} style={{
+            padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: 'none',
+            background: 'var(--l3)', color: '#fff', fontSize: 13, fontWeight: 600,
+            cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
+          }}>
+            {loading ? 'Gönderiliyor…' : 'Doğrulama Bağlantısı Gönder'}
+          </button>
+        </form>
+      )}
+      {message && (
+        <div style={{ fontSize: 11, marginTop: 8, color: message.ok ? 'var(--l2)' : 'var(--danger)' }}>
+          {message.text}
+        </div>
+      )}
     </div>
   );
 }

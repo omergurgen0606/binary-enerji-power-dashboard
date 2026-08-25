@@ -331,6 +331,93 @@ def change_password(payload: ChangePasswordRequest, user: str = Depends(require_
     conn.close()
     return {"message": "Şifre güncellendi"}
 
+
+class ChangeEmailRequest(BaseModel):
+    password: str
+    email: str
+
+
+EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+@app.post("/me/email")
+def change_email(payload: ChangeEmailRequest, user: str = Depends(require_auth)):
+    # E-posta degisikligi bir hesap-kurtarma vektoru oldugu icin mevcut sifre
+    # zorunlu; ayrica yeni adres, dogrulama linkine tiklanana kadar kaydedilmez
+    # (pending_email). Boylece yanlis/baskasinin adresi yazilsa bile hesabin
+    # gercek e-postasi degismez.
+    check_rate_limit(f"emailchange:{user}", max_attempts=5, window_seconds=60 * 60)
+    email = payload.email.strip().lower()
+    if not EMAIL_RE.match(email) or len(email) > 254:
+        raise HTTPException(status_code=400, detail="Geçerli bir e-posta adresi girin")
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
+    row = cur.fetchone()
+    if not row or not bcrypt.checkpw(payload.password.encode(), row[0].encode()):
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=403, detail="Şifre hatalı")
+
+    cur.execute("SELECT 1 FROM users WHERE lower(email) = %s AND username <> %s", (email, user))
+    if cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Bu e-posta adresi başka bir hesapta kayıtlı")
+
+    token = secrets.token_urlsafe(32)
+    cur.execute(
+        "UPDATE users SET pending_email = %s, pending_email_token = %s WHERE username = %s",
+        (email, token, user),
+    )
+    cur.close()
+    conn.close()
+
+    verify_url = f"{SITE_URL}/api/verify-email-change?token={token}"
+    try:
+        resend.Emails.send({
+            "from": RESEND_FROM,
+            "to": [email],
+            "subject": "Binary Enerji — E-posta Adresi Doğrulama",
+            "html": (
+                f"<p>Binary Enerji hesabınızın e-posta adresini bu adres olarak "
+                f"güncellemek için <a href='{verify_url}'>tıklayın</a>.</p>"
+                f"<p style='color:#666;font-size:13px'>Bu isteği siz yapmadıysanız bu e-postayı yok sayın; "
+                f"hesabınızda hiçbir değişiklik olmaz.</p>"
+            ),
+        })
+    except Exception as e:
+        logger.error("E-posta degisiklik dogrulamasi gonderilemedi: %s", e)
+        raise HTTPException(status_code=502, detail="Doğrulama e-postası gönderilemedi, lütfen tekrar deneyin")
+
+    return {"message": f"Doğrulama bağlantısı {email} adresine gönderildi. Onayladıktan sonra geçerli olacak."}
+
+
+@app.get("/verify-email-change", response_class=HTMLResponse)
+def verify_email_change(token: str):
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE users
+        SET email = pending_email, is_verified = true,
+            pending_email = NULL, pending_email_token = NULL
+        WHERE pending_email_token = %s AND pending_email IS NOT NULL
+        RETURNING email
+    """, (token,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return HTMLResponse("<h2>Geçersiz veya süresi dolmuş doğrulama linki.</h2>", status_code=400)
+    return HTMLResponse(
+        f"<h2>E-posta adresiniz güncellendi.</h2><p>{row[0]}</p>"
+        f'<a href="{SITE_URL}">Panoya dön</a>'
+    )
+
+
 ALLOWED_AVATAR_TYPES = {"image/jpeg", "image/png", "image/webp"}
 MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
