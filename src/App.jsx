@@ -698,12 +698,195 @@ function AccountField({ label, value }) {
   );
 }
 
-function DeviceList({ devices, onSelect, onLogout, onOpenAccount, token, onDeviceAdded }) {
+// ---------- Cihaz Filosu (yönetici görünümü) ----------
+const FLEET_STATUS = {
+  online: { label: 'Çevrimiçi', color: 'var(--l2)' },
+  stale: { label: 'Veri yok', color: 'var(--warn)' },
+  dead: { label: 'Sessiz', color: 'var(--danger)' },
+  never: { label: 'Hiç bağlanmadı', color: 'var(--muted)' },
+};
+
+function formatSilence(minutes) {
+  if (minutes == null) return '—';
+  if (minutes < 60) return `${minutes} dk`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} sa`;
+  return `${Math.floor(hours / 24)} gün`;
+}
+
+function FleetPage({ token, onBack }) {
+  const [fleet, setFleet] = useState(null);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState('all');
+
+  function refresh() {
+    axios.get(`${API_BASE}/admin/fleet`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setFleet(res.data))
+      .catch((err) => setError(err.response?.data?.detail || 'Filo bilgisi alınamadı.'));
+  }
+
+  useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, 30000);
+    return () => clearInterval(timer);
+  }, [token]);
+
+  const shown = fleet ? fleet.devices.filter((d) => filter === 'all' || d.status === filter) : [];
+  const problemCount = fleet ? (fleet.counts.stale + fleet.counts.dead + fleet.counts.never) : 0;
+
+  return (
+    <div className="centered-page" style={{ maxWidth: 900, padding: '0 24px' }}>
+      <button onClick={onBack} style={{
+        background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+        cursor: 'pointer', padding: 0, marginBottom: 16,
+      }}>
+        ← Cihazlarım
+      </button>
+      <h1 style={{ margin: '0 0 4px', fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700 }}>Cihaz Filosu</h1>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 20 }}>
+        Sisteme kayıtlı tüm cihazlar, canlı durumları ve firmware dağılımı.
+      </div>
+
+      {error && <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>}
+      {!error && !fleet && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>}
+
+      {fleet && (
+        <>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 10, marginBottom: 16 }}>
+            <FleetStat label="Toplam" value={fleet.total} onClick={() => setFilter('all')} active={filter === 'all'} />
+            {Object.entries(FLEET_STATUS).map(([key, def]) => (
+              <FleetStat
+                key={key} label={def.label} value={fleet.counts[key]} color={def.color}
+                onClick={() => setFilter(key)} active={filter === key}
+              />
+            ))}
+          </div>
+
+          {problemCount > 0 && filter === 'all' && (
+            <div style={{
+              fontSize: 12, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--warn)', color: 'var(--ink)', marginBottom: 16,
+              background: 'color-mix(in srgb, var(--warn) 8%, var(--surface))',
+            }}>
+              {problemCount} cihaz veri göndermiyor — sahada arıza, elektrik kesintisi veya WiFi sorunu olabilir.
+            </div>
+          )}
+
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 16, overflowX: 'auto',
+          }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, minWidth: 620 }}>
+              <thead>
+                <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                  {/* Durum ve son veri en kritik bilgiler, dar ekranda sağa taşıp
+                      kesilmesinler diye bilinçli olarak sola alındı. */}
+                  {['Cihaz', 'Durum', 'Son Veri', 'Firmware', 'Tip', 'Sahip'].map((h) => (
+                    <th key={h} style={{
+                      textAlign: 'left', padding: '6px 8px', color: 'var(--muted)',
+                      fontWeight: 600, fontSize: 11,
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {shown.map((d) => {
+                  const def = FLEET_STATUS[d.status];
+                  return (
+                    <tr key={d.device_id} style={{ borderBottom: '1px solid var(--border)' }}>
+                      <td style={{ padding: '8px' }}>
+                        <div style={{ fontWeight: 500 }}>{d.name}</div>
+                        <div className="mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{d.device_id}</div>
+                      </td>
+                      <td style={{ padding: '8px' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: '50%', background: def.color, flexShrink: 0 }} />
+                          <span style={{ fontSize: 12 }}>{def.label}</span>
+                        </span>
+                        {d.active_alarms > 0 && (
+                          <span style={{
+                            marginLeft: 8, fontSize: 10, fontWeight: 700, color: '#fff',
+                            background: 'var(--danger)', padding: '2px 6px', borderRadius: 100,
+                          }}>
+                            {d.active_alarms} alarm
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '8px', color: 'var(--muted)' }}>
+                        {d.last_seen ? `${formatSilence(d.minutes_silent)} önce` : '—'}
+                      </td>
+                      <td className="mono" style={{ padding: '8px' }}>{d.fw_version || '—'}</td>
+                      <td style={{ padding: '8px', color: 'var(--muted)' }}>{d.device_type || '—'}</td>
+                      <td style={{ padding: '8px', color: 'var(--muted)' }}>{d.owner}</td>
+                    </tr>
+                  );
+                })}
+                {shown.length === 0 && (
+                  <tr><td colSpan={6} style={{ padding: 16, textAlign: 'center', color: 'var(--muted)' }}>
+                    Bu durumda cihaz yok.
+                  </td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 16,
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Firmware Dağılımı</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {fleet.firmware_distribution.map((f) => (
+                <div key={f.version} style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 12 }}>
+                  <span className="mono" style={{ minWidth: 96 }}>{f.version}</span>
+                  <div style={{ flex: 1, height: 8, background: 'var(--bg)', borderRadius: 100, overflow: 'hidden' }}>
+                    <div style={{
+                      width: `${(f.count / fleet.total) * 100}%`, height: '100%',
+                      background: 'var(--l3)',
+                    }} />
+                  </div>
+                  <span style={{ color: 'var(--muted)', minWidth: 56, textAlign: 'right' }}>
+                    {f.count} cihaz
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+      <Footer />
+    </div>
+  );
+}
+
+function FleetStat({ label, value, color, onClick, active }) {
+  return (
+    <button type="button" onClick={onClick} style={{
+      background: active ? 'var(--surface)' : 'transparent',
+      border: `1px solid ${active ? (color || 'var(--accent)') : 'var(--border)'}`,
+      borderRadius: 'var(--radius-sm)', padding: '10px 12px', cursor: 'pointer',
+      textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2,
+    }}>
+      <span style={{ fontSize: 11, color: 'var(--muted)' }}>{label}</span>
+      <span className="mono" style={{ fontSize: 20, fontWeight: 600, color: color || 'var(--ink)' }}>{value}</span>
+    </button>
+  );
+}
+
+function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, isAdmin, token, onDeviceAdded }) {
   const [showAddForm, setShowAddForm] = useState(devices.length === 0);
 
   return (
     <div className="centered-page" style={{ maxWidth: 420, padding: '0 24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: -8 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginBottom: -8 }}>
+        {isAdmin && (
+          <button onClick={onOpenFleet} style={{
+            background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+            cursor: 'pointer', padding: 4, textDecoration: 'underline',
+          }}>
+            Cihaz Filosu
+          </button>
+        )}
         <button onClick={onOpenAccount} style={{
           background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
           cursor: 'pointer', padding: 4, textDecoration: 'underline',
@@ -2477,6 +2660,8 @@ export default function App() {
   const [devices, setDevices] = useState(null); // null = yükleniyor
   const [selectedDevice, setSelectedDevice] = useState(null);
   const [showAccount, setShowAccount] = useState(false);
+  const [showFleet, setShowFleet] = useState(false);
+  const [role, setRole] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || 'klasik');
 
   useEffect(() => {
@@ -2494,6 +2679,8 @@ export default function App() {
     setToken(null);
     setDevices(null);
     setSelectedDevice(null);
+    setShowFleet(false);
+    setRole(null);
   }
 
   function refreshDevices() {
@@ -2509,6 +2696,11 @@ export default function App() {
   useEffect(() => {
     if (!token) return;
     refreshDevices();
+    // Rol, "Cihaz Filosu" bağlantısının gösterilip gösterilmeyeceğini belirliyor.
+    // Asıl yetki kontrolü backend'de (require_admin) -- bu sadece görünürlük.
+    axios.get(`${API_BASE}/me`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setRole(res.data.role))
+      .catch(() => {});
   }, [token]);
 
   if (!token) {
@@ -2522,6 +2714,10 @@ export default function App() {
 
   if (devices === null) {
     return null;
+  }
+
+  if (showFleet) {
+    return <FleetPage token={token} onBack={() => setShowFleet(false)} />;
   }
 
   if (showAccount) {
@@ -2562,6 +2758,8 @@ export default function App() {
         onSelect={setSelectedDevice}
         onLogout={handleLogout}
         onOpenAccount={() => setShowAccount(true)}
+        onOpenFleet={() => setShowFleet(true)}
+        isAdmin={role === 'admin'}
         token={token}
         onDeviceAdded={refreshDevices}
       />
