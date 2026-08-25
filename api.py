@@ -4,10 +4,12 @@ import re
 import hmac
 import io
 import json
+import logging
 import os
 import secrets
 import threading
 import time
+import traceback
 from datetime import datetime, timedelta
 
 import bcrypt
@@ -104,6 +106,9 @@ GOOGLE_SERVICE_ACCOUNT_FILE = os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"]
 
 SITE_URL = "https://binaryenerji.com"
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger("binaryenerji")
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -114,6 +119,19 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    # HTTPException'lar (401/403/404 vb.) bunun disinda, kendi normal akisinda kalir --
+    # bu sadece beklenmeyen (gercek bug/kesinti) hatalari net bir sekilde loglar ki
+    # "docker compose logs api | grep 'UNHANDLED ERROR'" ile kolayca bulunabilsin.
+    logger.error(
+        "UNHANDLED ERROR %s %s -> %s: %s\n%s",
+        request.method, request.url.path, type(exc).__name__, exc,
+        traceback.format_exc(),
+    )
+    return Response(content='{"detail":"Sunucu hatası"}', status_code=500, media_type="application/json")
 
 # Kullanıcı profil fotoğrafları -- kimlik doğrulama gerektirmeyen, herkese açık
 # statik servis (basit <img>/AsyncImage kullanımı için, hassas veri içermiyor).
