@@ -24,6 +24,9 @@ const THEMES = [
 ];
 
 const THEME_STORAGE_KEY = 'theme';
+// Giris yapmadan davet baglantisina tiklayan kullanici, giris sonrasi davet
+// sayfasina geri donsun diye token gecici olarak saklaniyor.
+const PENDING_INVITE_KEY = 'pending_invite';
 
 function ThemePicker({ theme, onChange }) {
   return (
@@ -873,6 +876,124 @@ function FleetStat({ label, value, color, onClick, active }) {
   );
 }
 
+// ---------- Davet kabul sayfası (/davet?token=...) ----------
+function InvitePage({ token, onLogin }) {
+  const inviteToken = new URLSearchParams(window.location.search).get('token');
+  const [invite, setInvite] = useState(null);
+  const [error, setError] = useState('');
+  const [result, setResult] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!inviteToken) {
+      setError('Davet bağlantısı geçersiz.');
+      return;
+    }
+    axios.get(`${API_BASE}/invites/${inviteToken}`)
+      .then((res) => setInvite(res.data))
+      .catch((err) => setError(err.response?.data?.detail || 'Davet bulunamadı.'));
+  }, [inviteToken]);
+
+  async function accept() {
+    setBusy(true);
+    setError('');
+    try {
+      const res = await axios.post(`${API_BASE}/organization/invites/accept`,
+        { token: inviteToken }, { headers: { Authorization: `Bearer ${token}` } });
+      setResult(res.data.message);
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Davet kabul edilemedi.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="centered-page" style={{ maxWidth: 460, padding: '0 24px' }}>
+      <img src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
+      <div style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1, marginBottom: 20, textAlign: 'center' }}>
+        BINARY ENERJİ
+      </div>
+
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-md)', padding: 24,
+      }}>
+        {result ? (
+          <>
+            <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{result}</div>
+            <a href="/" style={{ fontSize: 13, color: 'var(--accent)' }}>Cihazlarıma git →</a>
+          </>
+        ) : error ? (
+          <>
+            <div style={{ fontSize: 13, color: 'var(--danger)', lineHeight: 1.6 }}>{error}</div>
+            <a href="/" style={{ fontSize: 13, color: 'var(--muted)', display: 'inline-block', marginTop: 12 }}>
+              Ana sayfaya dön
+            </a>
+          </>
+        ) : !invite ? (
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>
+        ) : invite.accepted ? (
+          <div style={{ fontSize: 13, color: 'var(--muted)' }}>Bu davet daha önce kullanılmış.</div>
+        ) : invite.expired ? (
+          <div style={{ fontSize: 13, color: 'var(--danger)' }}>
+            Davetin süresi dolmuş. Yöneticinizden yeni bir davet isteyin.
+          </div>
+        ) : (
+          <>
+            <h1 style={{ margin: '0 0 6px', fontFamily: 'var(--font-display)', fontSize: 19, fontWeight: 700 }}>
+              {invite.organization_name}
+            </h1>
+            <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 18 }}>
+              Bu organizasyona <b style={{ color: 'var(--ink)' }}>{ORG_ROLE_LABELS[invite.role] || invite.role}</b> olarak
+              davet edildiniz.
+              <br />
+              <span style={{ fontSize: 12 }}>Davet adresi: {invite.email}</span>
+            </div>
+
+            {token ? (
+              <button type="button" disabled={busy} onClick={accept} style={{
+                width: '100%', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: 'none',
+                background: 'var(--l3)', color: '#fff', fontSize: 14, fontWeight: 600,
+                cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1,
+              }}>
+                {busy ? 'Kabul ediliyor…' : 'Daveti Kabul Et'}
+              </button>
+            ) : (
+              <>
+                <div style={{
+                  fontSize: 12, color: 'var(--muted)', lineHeight: 1.6,
+                  padding: 12, borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                  marginBottom: 12,
+                }}>
+                  Daveti kabul etmek için önce <b>{invite.email}</b> adresiyle kayıtlı hesabınıza giriş yapın.
+                  Hesabınız yoksa o adresle üye olun.
+                </div>
+                {/* Davet bağlantısını saklıyoruz ki giriş sonrası kullanıcı elle
+                    e-postaya dönmek zorunda kalmasın. */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    sessionStorage.setItem(PENDING_INVITE_KEY, inviteToken);
+                    window.location.href = '/';
+                  }}
+                  style={{
+                    width: '100%', padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: 'none',
+                    background: 'var(--l3)', color: '#fff', fontSize: 14, fontWeight: 600, cursor: 'pointer',
+                  }}
+                >
+                  Giriş Yap / Üye Ol
+                </button>
+              </>
+            )}
+          </>
+        )}
+      </div>
+      <Footer />
+    </div>
+  );
+}
+
 // ---------- Organizasyon yönetimi ----------
 const ORG_ROLE_LABELS = {
   org_admin: 'Organizasyon Yöneticisi',
@@ -1071,11 +1192,153 @@ function OrganizationPage({ token, onBack }) {
                   />
                 ))}
               </div>
+
+              <InviteSection org={org} headers={headers} onError={setError} />
             </div>
           )}
         </>
       )}
       <Footer />
+    </div>
+  );
+}
+
+function InviteSection({ org, headers, onError }) {
+  const [invites, setInvites] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState('');
+  const [role, setRole] = useState('facility_manager');
+  const [facilityIds, setFacilityIds] = useState([]);
+  const [departmentIds, setDepartmentIds] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState('');
+
+  const allDepartments = org.facilities.flatMap((f) =>
+    f.departments.map((d) => ({ ...d, facilityName: f.name })));
+
+  function refresh() {
+    axios.get(`${API_BASE}/organization/invites`, { headers })
+      .then((res) => setInvites(res.data)).catch(() => {});
+  }
+
+  useEffect(refresh, []);
+
+  async function send() {
+    setBusy(true);
+    setSent('');
+    try {
+      await axios.post(`${API_BASE}/organization/invites`, {
+        email: email.trim(), role, facility_ids: facilityIds, department_ids: departmentIds,
+      }, { headers });
+      setSent(`Davet ${email.trim()} adresine gönderildi.`);
+      setEmail('');
+      setFacilityIds([]);
+      setDepartmentIds([]);
+      setOpen(false);
+      refresh();
+    } catch (err) {
+      onError(err.response?.data?.detail || 'Davet gönderilemedi.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancel(id) {
+    try {
+      await axios.delete(`${API_BASE}/organization/invites/${id}`, { headers });
+      refresh();
+    } catch (err) {
+      onError(err.response?.data?.detail || 'Davet iptal edilemedi.');
+    }
+  }
+
+  function toggle(list, setList, id) {
+    setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
+  }
+
+  return (
+    <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+      {invites.length > 0 && (
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--muted)', marginBottom: 8 }}>
+            Bekleyen Davetler
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {invites.map((inv) => (
+              <div key={inv.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, flexWrap: 'wrap' }}>
+                <span style={{ flex: 1, minWidth: 160 }}>{inv.email}</span>
+                <span style={{ color: 'var(--muted)' }}>{ORG_ROLE_LABELS[inv.role]}</span>
+                {inv.expired && <span style={{ color: 'var(--danger)', fontSize: 11 }}>süresi doldu</span>}
+                <button type="button" onClick={() => cancel(inv.id)} style={{
+                  background: 'none', border: 'none', color: 'var(--danger)', fontSize: 11,
+                  cursor: 'pointer', textDecoration: 'underline', padding: 0,
+                }}>İptal</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {sent && <div style={{ fontSize: 12, color: 'var(--l2)', marginBottom: 10 }}>{sent}</div>}
+
+      {open ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <input
+            type="email" placeholder="davet@eposta.com" value={email}
+            onChange={(e) => setEmail(e.target.value)} style={{ ...inputStyle, fontSize: 13 }}
+          />
+          <select value={role} onChange={(e) => setRole(e.target.value)}
+            style={{ ...inputStyle, fontSize: 13, padding: '8px 10px' }}>
+            {Object.entries(ORG_ROLE_LABELS).map(([key, label]) => (
+              <option key={key} value={key}>{label}</option>
+            ))}
+          </select>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{ORG_ROLE_HELP[role]}</div>
+
+          {role === 'facility_manager' && org.facilities.map((f) => (
+            <label key={f.id} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input type="checkbox" checked={facilityIds.includes(f.id)}
+                onChange={() => toggle(facilityIds, setFacilityIds, f.id)} />
+              {f.name}
+            </label>
+          ))}
+
+          {role === 'department_manager' && (
+            allDepartments.length === 0
+              ? <div style={{ fontSize: 11, color: 'var(--muted)' }}>Önce bir tesise bölüm ekleyin.</div>
+              : allDepartments.map((d) => (
+                <label key={d.id} style={{ fontSize: 12, display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input type="checkbox" checked={departmentIds.includes(d.id)}
+                    onChange={() => toggle(departmentIds, setDepartmentIds, d.id)} />
+                  {d.facilityName} · {d.name}
+                </label>
+              ))
+          )}
+
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="button" disabled={busy || !email.trim()} onClick={send} style={{
+              padding: '8px 14px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+              background: 'var(--bg)', color: 'var(--ink)', fontSize: 13, fontWeight: 600,
+              cursor: (busy || !email.trim()) ? 'default' : 'pointer', opacity: (busy || !email.trim()) ? 0.5 : 1,
+            }}>
+              {busy ? 'Gönderiliyor…' : 'Davet Gönder'}
+            </button>
+            <button type="button" onClick={() => setOpen(false)} style={{
+              padding: '8px 14px', border: 'none', background: 'none',
+              color: 'var(--muted)', fontSize: 13, cursor: 'pointer',
+            }}>
+              Vazgeç
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" onClick={() => setOpen(true)} style={{
+          padding: '8px 14px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+          background: 'var(--bg)', color: 'var(--ink)', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+        }}>
+          + Üye Davet Et
+        </button>
+      )}
     </div>
   );
 }
@@ -3040,6 +3303,9 @@ export default function App() {
   if (typeof window !== 'undefined' && window.location.pathname === '/kullanim-sartlari') {
     return <TermsOfService />;
   }
+  if (typeof window !== 'undefined' && window.location.pathname === '/davet') {
+    return <InvitePage token={localStorage.getItem('token')} />;
+  }
 
   const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [devices, setDevices] = useState(null); // null = yükleniyor
@@ -3058,6 +3324,11 @@ export default function App() {
   function handleLogin(newToken) {
     localStorage.setItem('token', newToken);
     setToken(newToken);
+    const pending = sessionStorage.getItem(PENDING_INVITE_KEY);
+    if (pending) {
+      sessionStorage.removeItem(PENDING_INVITE_KEY);
+      window.location.href = `/davet?token=${encodeURIComponent(pending)}`;
+    }
   }
 
   function handleLogout() {
