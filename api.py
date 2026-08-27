@@ -1871,6 +1871,41 @@ def get_energy(device_id: str, user: str = Depends(require_auth)):
                "active_wh_uretim", "inductive_varh_uretim", "capacitive_varh_uretim", "time"]
     return dict(zip(columns, row))
 
+# ---------- Saatlik enerji ozeti (device_energy_hourly) ----------
+# Ham device_energy'de saniyeler mertebesinde kayit var; saatlik artislar
+# TimescaleDB surekli toplamasinda (device_energy_hourly) onceden hesaplaniyor.
+# Boylece hem sorgular ham veriyi taramiyor hem de 180 gunluk saklama suresi
+# dolup ham kayitlar silindiginde gecmis raporlar bozulmuyor.
+#
+# Ozet, her saat icin first/last/max ucusunu birden tutuyor. Nedeni: cihaz
+# sayaci on panelden sifirlanabiliyor. Duz "last - onceki last" farki,
+# sifirlamanin oldugu saatte buyuk negatif cikip sifira kirpiliyor ve o saatin
+# TUM tuketimi kayboluyor (olculen bir ornekte 380 Wh'lik gercek tuketim 0
+# gorunuyordu). Asagidaki formul o saati de dogru hesapliyor:
+#     saat ici artis  : last - first            (normal saat)
+#                     : (max - first) + last    (saat icinde sifirlanmissa;
+#                                                sayacin ~0'a dondugu varsayilir)
+#     saatler arasi   : GREATEST(first - onceki last, 0)
+# Pencere fonksiyonu icin sorguda "WINDOW w AS (ORDER BY bucket)" tanimli olmali.
+_ENERGY_COLUMNS = [
+    # (ozetteki kisa ad, kumulatif sutun adi)
+    ("active_tuketim", "active_wh_tuketim"),
+    ("inductive_tuketim", "inductive_varh_tuketim"),
+    ("capacitive_tuketim", "capacitive_varh_tuketim"),
+    ("active_uretim", "active_wh_uretim"),
+    ("inductive_uretim", "inductive_varh_uretim"),
+    ("capacitive_uretim", "capacitive_varh_uretim"),
+]
+
+
+def _hourly_delta_sql(short: str, full: str) -> str:
+    return (
+        f"(GREATEST(first_{short} - LAG({full}) OVER w, 0)"
+        f" + CASE WHEN {full} >= first_{short} THEN {full} - first_{short}"
+        f" ELSE (max_{short} - first_{short}) + {full} END)"
+    )
+
+
 @app.get("/energy/hourly")
 def get_energy_hourly(device_id: str, format: str = "json", days: int = 7, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
@@ -1878,30 +1913,20 @@ def get_energy_hourly(device_id: str, format: str = "json", days: int = 7, user:
     days = max(1, min(days, 90))
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
-    cur.execute("""
-        WITH hourly AS (
-            SELECT
-                time_bucket('1 hour', time) AS bucket,
-                last(time, time) AS reading_time,
-                last(active_wh_tuketim, time) AS active_tuketim,
-                last(inductive_varh_tuketim, time) AS inductive_tuketim,
-                last(capacitive_varh_tuketim, time) AS capacitive_tuketim,
-                last(active_wh_uretim, time) AS active_uretim,
-                last(inductive_varh_uretim, time) AS inductive_uretim,
-                last(capacitive_varh_uretim, time) AS capacitive_uretim
-            FROM device_energy
-            WHERE device_id = %s AND time > now() - (%s * interval '1 day')
-            GROUP BY bucket
-        )
-        SELECT
-            bucket, reading_time,
-            active_tuketim, active_tuketim - LAG(active_tuketim) OVER (ORDER BY bucket) AS delta_active_tuketim,
-            inductive_tuketim, inductive_tuketim - LAG(inductive_tuketim) OVER (ORDER BY bucket) AS delta_inductive_tuketim,
-            capacitive_tuketim, capacitive_tuketim - LAG(capacitive_tuketim) OVER (ORDER BY bucket) AS delta_capacitive_tuketim,
-            active_uretim, active_uretim - LAG(active_uretim) OVER (ORDER BY bucket) AS delta_active_uretim,
-            inductive_uretim, inductive_uretim - LAG(inductive_uretim) OVER (ORDER BY bucket) AS delta_inductive_uretim,
-            capacitive_uretim, capacitive_uretim - LAG(capacitive_uretim) OVER (ORDER BY bucket) AS delta_capacitive_uretim
-        FROM hourly
+    select_parts = ", ".join(
+        f"{full} AS {short}, {_hourly_delta_sql(short, full)} AS delta_{short}"
+        for short, full in _ENERGY_COLUMNS
+    )
+    # Alt sorguya sarmak zorunlu: gercek zamanli surekli toplama gorunumu ile
+    # pencere fonksiyonu bir arada oldugunda planlayici dis "ORDER BY bucket DESC"i
+    # dusuruyor ve sonuc artan sirada donuyordu (arayuz en yeniyi basta bekliyor).
+    cur.execute(f"""
+        SELECT * FROM (
+            SELECT bucket, reading_time, {select_parts}
+            FROM device_energy_hourly
+            WHERE device_id = %s AND bucket > now() - (%s * interval '1 day')
+            WINDOW w AS (ORDER BY bucket)
+        ) t
         ORDER BY bucket DESC
     """, (device_id, days))
     rows = cur.fetchall()
@@ -2289,28 +2314,31 @@ def _read_tariff(device_id: str, cur) -> dict:
 
 
 def _reactive_buckets(device_id: str, unit: str, since, cur) -> list[dict]:
-    """device_energy kumulatif sayaclarindan donem bazli tuketim farklari.
+    """Saatlik enerji ozetinden donem bazli tuketim farklari.
 
-    Sayaclar cihaz sifirlandiginda geri dusebildigi icin negatif farklar
-    GREATEST(...,0) ile atiliyor -- sifirlama aninda sahte devasa tuketim
-    uretmemek icin. Ilk satirin LAG'i NULL'dir, GREATEST onu da 0 yapar.
+    Ham device_energy yerine device_energy_hourly surekli toplamasindan
+    okuyor: hem sorgu on-hesaplanmis veriyi tariyor hem de ham kayitlar
+    saklama suresi dolunca silindiginde gecmis raporlar bozulmuyor.
+    Sayac sifirlamasi _hourly_delta_sql icinde ele aliniyor.
     """
     cur.execute(f"""
         WITH deltas AS (
             SELECT
-                (time AT TIME ZONE %s) AS local_time,
-                GREATEST(active_wh_tuketim      - LAG(active_wh_tuketim)      OVER w, 0) AS d_active,
-                GREATEST(inductive_varh_tuketim - LAG(inductive_varh_tuketim) OVER w, 0) AS d_inductive,
-                GREATEST(capacitive_varh_tuketim- LAG(capacitive_varh_tuketim)OVER w, 0) AS d_capacitive
-            FROM device_energy
-            WHERE device_id = %s AND time >= %s
-            WINDOW w AS (ORDER BY time)
+                (bucket AT TIME ZONE %s) AS local_time,
+                {_hourly_delta_sql("active_tuketim", "active_wh_tuketim")} AS d_active,
+                {_hourly_delta_sql("inductive_tuketim", "inductive_varh_tuketim")} AS d_inductive,
+                {_hourly_delta_sql("capacitive_tuketim", "capacitive_varh_tuketim")} AS d_capacitive
+            FROM device_energy_hourly
+            WHERE device_id = %s AND bucket >= %s
+            WINDOW w AS (ORDER BY bucket)
         )
         SELECT date_trunc(%s, local_time) AS bucket,
                SUM(d_active) / 1000.0,
                SUM(d_inductive) / 1000.0,
                SUM(d_capacitive) / 1000.0,
-               COUNT(DISTINCT date_trunc('hour', local_time)) FILTER (WHERE d_active > 0)
+               -- Kovalar zaten saatlik oldugu icin "yuk altinda gecen saat"
+               -- dogrudan tuketim goren kova sayisi.
+               COUNT(*) FILTER (WHERE d_active > 0)
         FROM deltas
         GROUP BY bucket
         ORDER BY bucket ASC
