@@ -661,6 +661,48 @@ Saklama politikasıyla birlikte **sınırsız 4,7 GB/yıl/cihaz büyüme, sını
 tampon okuması 101 → 8 sayfaya düştü (12 kat), ve bu fark 12 aylık gerçek
 veride çok daha büyük olacak.
 
+
+### 5.12 Fatura Analizi — Üç Zamanlı Tarife + Güç Aşımı + Reaktif (27 Ağustos 2026)
+
+Reaktif ceza tek başına faturanın üçte birini açıklıyordu. Türkiye'de sanayi
+aboneliğinin **üç** para kalemi var ve cihaz üçü için de gereken veriyi zaten
+topluyor — bu iş üçünü tek bir aylık dökümde birleştiriyor.
+
+**Kalemler:**
+
+1. **Üç zamanlı tarife (T1/T2/T3)** — varsayılan T1 gündüz 06-17, T2 puant
+   17-22, T3 gece 22-06. Puant genelde gecenin ~3 katı olduğu için bir
+   fabrikanın elindeki **en büyük tasarruf kaldıracı** yükü puanttan geceye
+   kaydırmak. Rapor puant oranını ve kaydırmanın **tasarruf tavanını** veriyor;
+   arayüzde bunun ulaşılabilir bir hedef değil, üst sınır olduğu açıkça yazıyor.
+2. **Güç aşım bedeli** — 15 dakikalık ortalama güç sözleşme gücünü aşarsa.
+   `measurements_15min` özeti bir önceki çalışmada tam da bu yüzden 15 dakikalık
+   kovayla kurulmuştu. Tepenin **ne zaman** oluştuğu da dönüyor; genelde
+   müşteri için rapordaki en eyleme dönük tek rakam bu.
+3. **Reaktif ceza** — mevcut analizden alınıyor, yeniden hesaplanmıyor. Böylece
+   iki rapor arasında tutarsızlık oluşamaz.
+
+**Ayarlanabilirlik:** Reaktifte olduğu gibi dilim saatleri, birim fiyatlar,
+sözleşme gücü ve aşım bedeli koda gömülmüyor — tarifeye ve abone grubuna göre
+değişip dönemsel güncellendiği için müşteri kendi faturasından kalibre ediyor.
+Üç dilim fiyatı da 0 bırakılırsa tek fiyatlı `active_price`'a düşüyor; sözleşme
+gücü boş bırakılırsa güç aşım analizi hiç yapılmıyor.
+
+**Endpoint:** `GET /reports/bill?device_id=&months=&format=json|xlsx`.
+Şema: `device_tariff` tablosuna `t1/t2/t3_start`, `t1/t2/t3_price`,
+`contract_power_kw`, `demand_price` sütunları eklendi.
+
+**Doğrulama (gerçek cihaz verisiyle, üç platformda):** Dilim kırılımı bilinen
+toplama kWh'ye kadar tutuyor (458,7 + 51,1 + 32,2 = 542,0); kalemler beyan
+edilen toplama eşit (1.787,89 + 735,75 + 1.599,75 = 4.123,39); reaktif kalemi
+tek başına çalışan reaktif raporuyla birebir aynı. Uç durumlar: fiyat/sözleşme
+gücü girilmemiş cihaz sadece tüketim kırılımı gösteriyor, ters sıralı dilim
+saatleri ve pozitif olmayan sözleşme gücü reddediliyor.
+
+**Ticari not:** Test cihazında bu üçlü şunu ortaya çıkardı — faturanın
+**%57'si ceza** (reaktif %39, güç aşımı %18). Ürünün satış argümanı tam olarak
+bu tablo.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
