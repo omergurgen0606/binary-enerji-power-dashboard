@@ -2233,6 +2233,316 @@ def set_ct_ratio(device_id: str, payload: CtRatioRequest, user: str = Depends(re
 def get_ct_ratio_table(user: str = Depends(require_auth)):
     return CT_RATIO_TABLE
 
+# ---------- Reaktif ceza analizi ----------
+# Turkiye'de reaktif enerji bedeli aylik toplamlar uzerinden hesaplanir:
+# sebekeden cekilen endüktif reaktif enerji ile sebekeye verilen kapasitif
+# reaktif enerji, tuketilen aktif enerjinin belirli bir yuzdesini asamaz.
+# Limit asilirsa reaktif enerji faturaya yansir -- yaygin uygulamada sadece
+# asan kisim degil, o ay cekilen reaktif enerjinin TAMAMI faturalandirilir
+# (billing_mode = 'full'). Oranlar, birim fiyatlar ve bu hesaplama yontemi
+# tarifeye/abone grubuna gore degistigi ve donemsel guncellendigi icin koda
+# gomulmuyor: musteri kendi faturasindaki degerleri girerek kalibre eder.
+TARIFF_PRESETS = {
+    # Kompanzasyon yukumlusu abone (kurulu guc >= 50 kW)
+    "over_50kw": {"inductive_limit_pct": 20.0, "capacitive_limit_pct": 15.0},
+    # Kucuk abone (kurulu guc < 50 kW)
+    "under_50kw": {"inductive_limit_pct": 33.0, "capacitive_limit_pct": 20.0},
+}
+TARIFF_DEFAULTS = {
+    "inductive_limit_pct": 20.0,
+    "capacitive_limit_pct": 15.0,
+    "reactive_price": 0.0,
+    "active_price": 0.0,
+    "billing_mode": "full",
+}
+BILLING_MODES = ("full", "excess")
+# Faturalama donemi yerel aya gore isler, UTC'ye gore degil.
+BILLING_TZ = "Europe/Istanbul"
+
+
+class TariffRequest(BaseModel):
+    inductive_limit_pct: float
+    capacitive_limit_pct: float
+    reactive_price: float
+    active_price: float
+    billing_mode: str
+
+
+def _read_tariff(device_id: str, cur) -> dict:
+    cur.execute("""
+        SELECT inductive_limit_pct, capacitive_limit_pct, reactive_price,
+               active_price, billing_mode, updated_at
+        FROM device_tariff WHERE device_id = %s
+    """, (device_id,))
+    row = cur.fetchone()
+    if not row:
+        return {**TARIFF_DEFAULTS, "updated_at": None, "configured": False}
+    return {
+        "inductive_limit_pct": float(row[0]),
+        "capacitive_limit_pct": float(row[1]),
+        "reactive_price": float(row[2]),
+        "active_price": float(row[3]),
+        "billing_mode": row[4],
+        "updated_at": row[5],
+        "configured": True,
+    }
+
+
+def _reactive_buckets(device_id: str, unit: str, since, cur) -> list[dict]:
+    """device_energy kumulatif sayaclarindan donem bazli tuketim farklari.
+
+    Sayaclar cihaz sifirlandiginda geri dusebildigi icin negatif farklar
+    GREATEST(...,0) ile atiliyor -- sifirlama aninda sahte devasa tuketim
+    uretmemek icin. Ilk satirin LAG'i NULL'dir, GREATEST onu da 0 yapar.
+    """
+    cur.execute(f"""
+        WITH deltas AS (
+            SELECT
+                (time AT TIME ZONE %s) AS local_time,
+                GREATEST(active_wh_tuketim      - LAG(active_wh_tuketim)      OVER w, 0) AS d_active,
+                GREATEST(inductive_varh_tuketim - LAG(inductive_varh_tuketim) OVER w, 0) AS d_inductive,
+                GREATEST(capacitive_varh_tuketim- LAG(capacitive_varh_tuketim)OVER w, 0) AS d_capacitive
+            FROM device_energy
+            WHERE device_id = %s AND time >= %s
+            WINDOW w AS (ORDER BY time)
+        )
+        SELECT date_trunc(%s, local_time) AS bucket,
+               SUM(d_active) / 1000.0,
+               SUM(d_inductive) / 1000.0,
+               SUM(d_capacitive) / 1000.0,
+               COUNT(DISTINCT date_trunc('hour', local_time)) FILTER (WHERE d_active > 0)
+        FROM deltas
+        GROUP BY bucket
+        ORDER BY bucket ASC
+    """, (BILLING_TZ, device_id, since, unit))
+    return [
+        {
+            "bucket": r[0],
+            "active_kwh": float(r[1] or 0),
+            "inductive_kvarh": float(r[2] or 0),
+            "capacitive_kvarh": float(r[3] or 0),
+            "load_hours": int(r[4] or 0),
+        }
+        for r in cur.fetchall()
+    ]
+
+
+def _analyze_bucket(row: dict, tariff: dict) -> dict:
+    active = row["active_kwh"]
+    ind = row["inductive_kvarh"]
+    cap = row["capacitive_kvarh"]
+    ind_limit = tariff["inductive_limit_pct"]
+    cap_limit = tariff["capacitive_limit_pct"]
+
+    ind_pct = (ind / active * 100) if active > 0 else None
+    cap_pct = (cap / active * 100) if active > 0 else None
+
+    # Limite karsilik gelen kVArh tavani -- asim bunun uzerinden hesaplanir.
+    ind_allowed = active * ind_limit / 100
+    cap_allowed = active * cap_limit / 100
+    ind_excess = max(ind - ind_allowed, 0.0)
+    cap_excess = max(cap - cap_allowed, 0.0)
+
+    ind_over = active > 0 and ind_excess > 0
+    cap_over = active > 0 and cap_excess > 0
+
+    if tariff["billing_mode"] == "excess":
+        billed_ind = ind_excess
+        billed_cap = cap_excess
+    else:
+        # Limit asildiginda reaktif enerjinin tamami faturalanir.
+        billed_ind = ind if ind_over else 0.0
+        billed_cap = cap if cap_over else 0.0
+
+    penalty_cost = (billed_ind + billed_cap) * tariff["reactive_price"]
+    active_cost = active * tariff["active_price"]
+
+    # Asimi kapatmak icin gereken kompanzasyon gucu (kaba tahmin):
+    # asan kVArh, yuk altinda gecen saat sayisina bolunur.
+    hours = row["load_hours"]
+    suggested_kvar = round(ind_excess / hours, 1) if ind_over and hours > 0 else None
+
+    return {
+        **row,
+        "inductive_pct": round(ind_pct, 1) if ind_pct is not None else None,
+        "capacitive_pct": round(cap_pct, 1) if cap_pct is not None else None,
+        "inductive_over": ind_over,
+        "capacitive_over": cap_over,
+        "inductive_excess_kvarh": round(ind_excess, 2),
+        "capacitive_excess_kvarh": round(cap_excess, 2),
+        "billed_inductive_kvarh": round(billed_ind, 2),
+        "billed_capacitive_kvarh": round(billed_cap, 2),
+        "penalty_cost": round(penalty_cost, 2),
+        "active_cost": round(active_cost, 2),
+        "suggested_kvar": suggested_kvar,
+        "active_kwh": round(active, 2),
+        "inductive_kvarh": round(ind, 2),
+        "capacitive_kvarh": round(cap, 2),
+    }
+
+
+@app.get("/devices/{device_id}/tariff")
+def get_tariff(device_id: str, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    tariff = _read_tariff(device_id, cur)
+    cur.close()
+    conn.close()
+    return {**tariff, "presets": TARIFF_PRESETS}
+
+
+@app.put("/devices/{device_id}/tariff")
+def set_tariff(device_id: str, payload: TariffRequest, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if payload.billing_mode not in BILLING_MODES:
+        raise HTTPException(status_code=400, detail="Geçersiz hesaplama yöntemi")
+    for name, value in (("Endüktif limit", payload.inductive_limit_pct),
+                        ("Kapasitif limit", payload.capacitive_limit_pct)):
+        if not 0 < value <= 100:
+            raise HTTPException(status_code=400, detail=f"{name} 0 ile 100 arasında olmalı")
+    for name, value in (("Reaktif birim fiyat", payload.reactive_price),
+                        ("Aktif birim fiyat", payload.active_price)):
+        if value < 0:
+            raise HTTPException(status_code=400, detail=f"{name} negatif olamaz")
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO device_tariff (device_id, inductive_limit_pct, capacitive_limit_pct,
+                                   reactive_price, active_price, billing_mode, updated_at, updated_by)
+        VALUES (%s, %s, %s, %s, %s, %s, now(), %s)
+        ON CONFLICT (device_id) DO UPDATE SET
+            inductive_limit_pct = EXCLUDED.inductive_limit_pct,
+            capacitive_limit_pct = EXCLUDED.capacitive_limit_pct,
+            reactive_price = EXCLUDED.reactive_price,
+            active_price = EXCLUDED.active_price,
+            billing_mode = EXCLUDED.billing_mode,
+            updated_at = now(),
+            updated_by = EXCLUDED.updated_by
+    """, (device_id, payload.inductive_limit_pct, payload.capacitive_limit_pct,
+          payload.reactive_price, payload.active_price, payload.billing_mode, user))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Tarife ayarları kaydedildi"}
+
+
+@app.get("/reports/reactive")
+def reactive_report(device_id: str, period: str = "monthly", count: int = 12,
+                    format: str = "json", user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if period not in ("monthly", "daily"):
+        raise HTTPException(status_code=400, detail="Geçersiz dönem")
+
+    if period == "monthly":
+        count = max(1, min(count, 36))
+        unit = "month"
+        since = datetime.now(timezone.utc) - timedelta(days=31 * count)
+    else:
+        count = max(1, min(count, 180))
+        unit = "day"
+        since = datetime.now(timezone.utc) - timedelta(days=count)
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    tariff = _read_tariff(device_id, cur)
+    buckets = _reactive_buckets(device_id, unit, since, cur)
+    cur.close()
+    conn.close()
+
+    rows = [_analyze_bucket(b, tariff) for b in buckets][-count:]
+
+    penalized = [r for r in rows if r["inductive_over"] or r["capacitive_over"]]
+    summary = {
+        "period_count": len(rows),
+        "penalized_count": len(penalized),
+        "total_active_kwh": round(sum(r["active_kwh"] for r in rows), 2),
+        "total_inductive_kvarh": round(sum(r["inductive_kvarh"] for r in rows), 2),
+        "total_capacitive_kvarh": round(sum(r["capacitive_kvarh"] for r in rows), 2),
+        "total_penalty_cost": round(sum(r["penalty_cost"] for r in rows), 2),
+        "total_active_cost": round(sum(r["active_cost"] for r in rows), 2),
+        "worst_inductive_pct": max((r["inductive_pct"] for r in rows if r["inductive_pct"] is not None), default=None),
+        "worst_capacitive_pct": max((r["capacitive_pct"] for r in rows if r["capacitive_pct"] is not None), default=None),
+        "max_suggested_kvar": max((r["suggested_kvar"] for r in rows if r["suggested_kvar"] is not None), default=None),
+    }
+
+    if format == "xlsx":
+        return _reactive_xlsx(device_id, period, rows, summary, tariff)
+
+    return {"device_id": device_id, "period": period, "tariff": tariff,
+            "rows": rows, "summary": summary}
+
+
+def _reactive_xlsx(device_id: str, period: str, rows: list[dict],
+                   summary: dict, tariff: dict) -> Response:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Reaktif Analiz"
+
+    mode_label = ("Limit aşılırsa reaktifin tamamı" if tariff["billing_mode"] == "full"
+                  else "Yalnızca aşan kısım")
+    for label, value in (
+        ("Cihaz", device_id),
+        ("Rapor tarihi", datetime.now().strftime("%d.%m.%Y %H:%M")),
+        ("Endüktif limit", f"%{tariff['inductive_limit_pct']:g}"),
+        ("Kapasitif limit", f"%{tariff['capacitive_limit_pct']:g}"),
+        ("Reaktif birim fiyat", f"{tariff['reactive_price']:g} TL/kVArh"),
+        ("Hesaplama yöntemi", mode_label),
+    ):
+        ws.append([label, value])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+    ws.append([])
+
+    headers = ["Dönem", "Aktif (kWh)", "Endüktif (kVArh)", "Kapasitif (kVArh)",
+               "Endüktif %", "Kapasitif %", "Durum", "Aşım (kVArh)",
+               "Faturalanan Reaktif (kVArh)", "Ceza (TL)", "Önerilen Komp. (kVAr)"]
+    header_row = ws.max_row + 1
+    ws.append(headers)
+    for cell in ws[header_row]:
+        cell.font = Font(bold=True)
+
+    fmt = "%m.%Y" if period == "monthly" else "%d.%m.%Y"
+    for r in rows:
+        if r["inductive_over"] and r["capacitive_over"]:
+            durum = "Endüktif + Kapasitif aşım"
+        elif r["inductive_over"]:
+            durum = "Endüktif aşım"
+        elif r["capacitive_over"]:
+            durum = "Kapasitif aşım"
+        else:
+            durum = "Limit içinde"
+        ws.append([
+            r["bucket"].strftime(fmt),
+            r["active_kwh"], r["inductive_kvarh"], r["capacitive_kvarh"],
+            r["inductive_pct"], r["capacitive_pct"], durum,
+            round(r["inductive_excess_kvarh"] + r["capacitive_excess_kvarh"], 2),
+            round(r["billed_inductive_kvarh"] + r["billed_capacitive_kvarh"], 2),
+            r["penalty_cost"], r["suggested_kvar"],
+        ])
+
+    total_row = ws.max_row + 1
+    ws.append(["TOPLAM", summary["total_active_kwh"], summary["total_inductive_kvarh"],
+               summary["total_capacitive_kvarh"], None, None,
+               f"{summary['penalized_count']} / {summary['period_count']} dönemde aşım",
+               None, None, summary["total_penalty_cost"], None])
+    for cell in ws[total_row]:
+        cell.font = Font(bold=True)
+
+    for i, header in enumerate(headers, start=1):
+        ws.column_dimensions[ws.cell(row=header_row, column=i).column_letter].width = max(14, len(header) * 1.1)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    filename = f"{device_id}-reaktif-analiz.xlsx"
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
 # ---------- WebSocket: Canlı veri ----------
 connected_clients: list[tuple[WebSocket, str]] = []
 device_status: dict[str, dict] = {}  # device_id -> {"status": "online"|"offline", "changed_at": iso}

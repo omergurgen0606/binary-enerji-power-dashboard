@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
-import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, BarChart, Bar, ComposedChart, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './index.css';
 
 const API_BASE = 'https://binaryenerji.com/api';
@@ -2299,6 +2299,358 @@ const ALARM_METRIC_LIST = [
   { key: 'offline', label: 'Cihaz çevrimdışı', unit: 'dakika', step: '1', placeholder: '15' },
 ];
 
+// ---------- Reaktif Ceza Analizi ----------
+const REACTIVE_PERIODS = [['monthly', 'Aylık'], ['daily', 'Günlük']];
+
+function money(v) {
+  if (v == null) return '—';
+  return v.toLocaleString('tr-TR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' ₺';
+}
+
+function periodLabel(bucket, period) {
+  const d = new Date(bucket);
+  return period === 'monthly'
+    ? d.toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' })
+    : d.toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit' });
+}
+
+function ReactiveStat({ label, value, hint, danger }) {
+  return (
+    <div style={{
+      flex: '1 1 150px', minWidth: 150, padding: '12px 14px',
+      borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+      background: danger ? 'color-mix(in srgb, var(--danger) 8%, var(--surface))' : 'var(--bg)',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
+      <div className="mono" style={{ fontSize: 18, fontWeight: 600, color: danger ? 'var(--danger)' : 'var(--ink)' }}>{value}</div>
+      {hint && <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 3 }}>{hint}</div>}
+    </div>
+  );
+}
+
+function TariffForm({ token, device, tariff, onSaved }) {
+  const [form, setForm] = useState({
+    inductive_limit_pct: tariff.inductive_limit_pct,
+    capacitive_limit_pct: tariff.capacitive_limit_pct,
+    reactive_price: tariff.reactive_price,
+    active_price: tariff.active_price,
+    billing_mode: tariff.billing_mode,
+  });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState('');
+  const [error, setError] = useState('');
+
+  function set(key, value) {
+    setForm((f) => ({ ...f, [key]: value }));
+    setMsg('');
+  }
+
+  function applyPreset(name) {
+    const p = tariff.presets?.[name];
+    if (p) setForm((f) => ({ ...f, ...p }));
+    setMsg('');
+  }
+
+  async function save() {
+    setSaving(true); setError(''); setMsg('');
+    try {
+      await axios.put(`${API_BASE}/devices/${device.device_id}/tariff`, {
+        inductive_limit_pct: Number(form.inductive_limit_pct),
+        capacitive_limit_pct: Number(form.capacitive_limit_pct),
+        reactive_price: Number(form.reactive_price),
+        active_price: Number(form.active_price),
+        billing_mode: form.billing_mode,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      setMsg('Kaydedildi.');
+      onSaved();
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Kaydedilemedi.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field = {
+    width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-xs)',
+    border: '1px solid var(--border)', background: 'var(--surface)',
+    color: 'var(--ink)', fontSize: 13, fontFamily: 'inherit',
+  };
+  const labelStyle = { fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 };
+
+  return (
+    <div style={{
+      marginTop: 16, padding: 16, borderRadius: 'var(--radius-sm)',
+      border: '1px dashed var(--border)', background: 'var(--bg)',
+    }}>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+        Limitler ve birim fiyatlar tarifeye göre değişir. Faturanızdaki değerleri girerek hesabı kendi
+        aboneliğinize göre kalibre edin.
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: 'var(--muted)', alignSelf: 'center' }}>Hazır limitler:</span>
+        <button type="button" onClick={() => applyPreset('over_50kw')} style={{
+          padding: '5px 10px', fontSize: 11, borderRadius: 'var(--radius-xs)',
+          border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)', cursor: 'pointer',
+        }}>≥ 50 kW (%20 / %15)</button>
+        <button type="button" onClick={() => applyPreset('under_50kw')} style={{
+          padding: '5px 10px', fontSize: 11, borderRadius: 'var(--radius-xs)',
+          border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--ink)', cursor: 'pointer',
+        }}>&lt; 50 kW (%33 / %20)</button>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12 }}>
+        <div>
+          <label style={labelStyle}>Endüktif limit (%)</label>
+          <input style={field} type="number" step="0.1" value={form.inductive_limit_pct}
+                 onChange={(e) => set('inductive_limit_pct', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Kapasitif limit (%)</label>
+          <input style={field} type="number" step="0.1" value={form.capacitive_limit_pct}
+                 onChange={(e) => set('capacitive_limit_pct', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Reaktif birim fiyat (₺/kVArh)</label>
+          <input style={field} type="number" step="0.0001" value={form.reactive_price}
+                 onChange={(e) => set('reactive_price', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Aktif birim fiyat (₺/kWh)</label>
+          <input style={field} type="number" step="0.0001" value={form.active_price}
+                 onChange={(e) => set('active_price', e.target.value)} />
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={labelStyle}>Ceza hesaplama yöntemi</label>
+          <select style={field} value={form.billing_mode} onChange={(e) => set('billing_mode', e.target.value)}>
+            <option value="full">Limit aşılırsa reaktifin tamamı faturalanır</option>
+            <option value="excess">Yalnızca limiti aşan kısım faturalanır</option>
+          </select>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
+        <button type="button" onClick={save} disabled={saving} style={{
+          padding: '8px 16px', borderRadius: 'var(--radius-xs)', border: 'none',
+          background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
+          cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+        }}>{saving ? 'Kaydediliyor…' : 'Kaydet'}</button>
+        {msg && <span style={{ fontSize: 12, color: 'var(--accent)' }}>{msg}</span>}
+        {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ReactiveSection({ token, device }) {
+  const [period, setPeriod] = useState('monthly');
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null); setError('');
+    const count = period === 'monthly' ? 12 : 30;
+    axios.get(`${API_BASE}/reports/reactive?device_id=${device.device_id}&period=${period}&count=${count}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => { if (!cancelled) setData(res.data); })
+      .catch(() => { if (!cancelled) setError('Reaktif analiz yüklenemedi.'); });
+    return () => { cancelled = true; };
+  }, [device.device_id, period, token, reloadKey]);
+
+  async function downloadXlsx() {
+    setDownloading(true);
+    try {
+      const count = period === 'monthly' ? 12 : 30;
+      const res = await axios.get(
+        `${API_BASE}/reports/reactive?device_id=${device.device_id}&period=${period}&count=${count}&format=xlsx`,
+        { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${device.device_id}-reaktif-analiz.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Excel indirilemedi.');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const rows = data?.rows || [];
+  const tariff = data?.tariff;
+  const summary = data?.summary;
+  const chartData = rows.map((r) => ({
+    label: periodLabel(r.bucket, period),
+    aktif: r.active_kwh,
+    endPct: r.inductive_pct,
+    kapPct: r.capacitive_pct,
+  }));
+  const hasPrice = tariff && tariff.reactive_price > 0;
+
+  return (
+    <SectionCard
+      title="Reaktif Ceza Analizi"
+      right={
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <TabToggle options={REACTIVE_PERIODS} value={period} onChange={setPeriod} />
+          <button type="button" onClick={downloadXlsx} disabled={downloading || rows.length === 0} style={{
+            padding: '6px 12px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--muted)', fontSize: 12, fontWeight: 600,
+            cursor: downloading || rows.length === 0 ? 'default' : 'pointer',
+          }}>{downloading ? 'İndiriliyor…' : 'Excel indir'}</button>
+          <button type="button" onClick={() => setSettingsOpen((o) => !o)} style={{
+            padding: '6px 12px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>Tarife {settingsOpen ? '▲' : '▼'}</button>
+        </div>
+      }
+    >
+      {error && <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>}
+      {!error && data === null && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>}
+
+      {!error && data && rows.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>Bu aralıkta enerji verisi yok.</div>
+      )}
+
+      {!error && data && rows.length > 0 && (
+        <>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+            <ReactiveStat
+              label="Cezalı dönem"
+              value={`${summary.penalized_count} / ${summary.period_count}`}
+              hint={period === 'monthly' ? 'ay' : 'gün'}
+              danger={summary.penalized_count > 0}
+            />
+            <ReactiveStat
+              label="En yüksek endüktif"
+              value={summary.worst_inductive_pct != null ? `%${summary.worst_inductive_pct}` : '—'}
+              hint={`limit %${tariff.inductive_limit_pct}`}
+              danger={summary.worst_inductive_pct > tariff.inductive_limit_pct}
+            />
+            <ReactiveStat
+              label="En yüksek kapasitif"
+              value={summary.worst_capacitive_pct != null ? `%${summary.worst_capacitive_pct}` : '—'}
+              hint={`limit %${tariff.capacitive_limit_pct}`}
+              danger={summary.worst_capacitive_pct > tariff.capacitive_limit_pct}
+            />
+            {hasPrice && (
+              <ReactiveStat
+                label="Toplam ceza"
+                value={money(summary.total_penalty_cost)}
+                hint={summary.total_active_cost > 0
+                  ? `aktif bedelin %${(summary.total_penalty_cost / summary.total_active_cost * 100).toFixed(1)}'i`
+                  : null}
+                danger={summary.total_penalty_cost > 0}
+              />
+            )}
+            {summary.max_suggested_kvar != null && (
+              <ReactiveStat
+                label="Önerilen kompanzasyon"
+                value={`${summary.max_suggested_kvar} kVAr`}
+                hint="aşımı kapatmak için"
+              />
+            )}
+          </div>
+
+          {!hasPrice && (
+            <div style={{
+              fontSize: 12, color: 'var(--muted)', marginBottom: 16, padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+            }}>
+              Ceza tutarını görebilmek için <b>Tarife</b> bölümünden faturanızdaki reaktif birim fiyatı girin.
+            </div>
+          )}
+
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--muted)' }} />
+              <YAxis yAxisId="kwh" tick={{ fontSize: 10, fill: 'var(--muted)' }} width={45} />
+              <YAxis yAxisId="pct" orientation="right" tick={{ fontSize: 10, fill: 'var(--muted)' }} width={40}
+                     tickFormatter={(v) => `%${v}`} />
+              <Tooltip
+                contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                formatter={(val, name) => (name === 'Aktif' ? `${val} kWh` : `%${val}`)}
+              />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar yAxisId="kwh" dataKey="aktif" name="Aktif" fill="var(--l3)" radius={[4, 4, 0, 0]} />
+              <ReferenceLine yAxisId="pct" y={tariff.inductive_limit_pct} stroke="var(--danger)"
+                             strokeDasharray="4 4" />
+              <ReferenceLine yAxisId="pct" y={tariff.capacitive_limit_pct} stroke="var(--l2)"
+                             strokeDasharray="4 4" />
+              <Line yAxisId="pct" type="monotone" dataKey="endPct" name="Endüktif %" stroke="var(--danger)"
+                    strokeWidth={2} dot={{ r: 2 }} connectNulls />
+              <Line yAxisId="pct" type="monotone" dataKey="kapPct" name="Kapasitif %" stroke="var(--l2)"
+                    strokeWidth={2} dot={{ r: 2 }} connectNulls />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+            Kesikli çizgiler limitleri gösterir — çizginin üstündeki dönemlerde reaktif bedel doğar.
+          </div>
+
+          <div style={{ overflowX: 'auto', marginTop: 16 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 640 }}>
+              <thead>
+                <tr style={{ color: 'var(--muted)', textAlign: 'right' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Dönem</th>
+                  <th style={{ padding: '6px 8px' }}>Aktif (kWh)</th>
+                  <th style={{ padding: '6px 8px' }}>Endüktif</th>
+                  <th style={{ padding: '6px 8px' }}>Kapasitif</th>
+                  <th style={{ padding: '6px 8px' }}>Aşım (kVArh)</th>
+                  {hasPrice && <th style={{ padding: '6px 8px' }}>Ceza</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {[...rows].reverse().map((r) => {
+                  const over = r.inductive_over || r.capacitive_over;
+                  const excess = r.inductive_excess_kvarh + r.capacitive_excess_kvarh;
+                  return (
+                    <tr key={r.bucket} style={{
+                      borderTop: '1px solid var(--border)',
+                      background: over ? 'color-mix(in srgb, var(--danger) 6%, transparent)' : 'transparent',
+                    }}>
+                      <td style={{ padding: '7px 8px', fontWeight: 500 }}>{periodLabel(r.bucket, period)}</td>
+                      <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>{r.active_kwh}</td>
+                      <td className="mono" style={{
+                        padding: '7px 8px', textAlign: 'right',
+                        color: r.inductive_over ? 'var(--danger)' : 'var(--ink)',
+                        fontWeight: r.inductive_over ? 600 : 400,
+                      }}>{r.inductive_pct != null ? `%${r.inductive_pct}` : '—'}</td>
+                      <td className="mono" style={{
+                        padding: '7px 8px', textAlign: 'right',
+                        color: r.capacitive_over ? 'var(--danger)' : 'var(--ink)',
+                        fontWeight: r.capacitive_over ? 600 : 400,
+                      }}>{r.capacitive_pct != null ? `%${r.capacitive_pct}` : '—'}</td>
+                      <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>
+                        {excess > 0 ? excess.toFixed(1) : '—'}
+                      </td>
+                      {hasPrice && (
+                        <td className="mono" style={{
+                          padding: '7px 8px', textAlign: 'right',
+                          color: r.penalty_cost > 0 ? 'var(--danger)' : 'var(--muted)',
+                        }}>{r.penalty_cost > 0 ? money(r.penalty_cost) : '—'}</td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+
+      {settingsOpen && tariff && (
+        <TariffForm token={token} device={device} tariff={tariff} onSaved={() => setReloadKey((k) => k + 1)} />
+      )}
+    </SectionCard>
+  );
+}
+
 function formatAlarmTime(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
@@ -3136,6 +3488,7 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
       </div>
 
       <TrendSection token={token} device={device} />
+      <ReactiveSection token={token} device={device} />
       <StatsSection stats={stats} theme={theme} />
       <PeaksSection peaks={peaks} />
       <DemandSection demand={demand} />
