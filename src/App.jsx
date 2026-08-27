@@ -2299,6 +2299,257 @@ const ALARM_METRIC_LIST = [
   { key: 'offline', label: 'Cihaz çevrimdışı', unit: 'dakika', step: '1', placeholder: '15' },
 ];
 
+// ---------- Fatura Analizi (zaman dilimi + güç aşımı + reaktif) ----------
+function monthLabel(bucket) {
+  return new Date(bucket).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' });
+}
+
+function BillSection({ token, device }) {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null); setError('');
+    axios.get(`${API_BASE}/reports/bill?device_id=${device.device_id}&months=12`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => { if (!cancelled) setData(res.data); })
+      .catch(() => { if (!cancelled) setError('Fatura analizi yüklenemedi.'); });
+    return () => { cancelled = true; };
+  }, [device.device_id, token]);
+
+  // Tarife kaydedildikten sonra sessiz tazeleme: data'yı null'a çekmiyoruz ki
+  // TariffForm unmount olup "Kaydedildi." mesajı görülmeden kaybolmasın.
+  async function reloadSilently() {
+    try {
+      const res = await axios.get(`${API_BASE}/reports/bill?device_id=${device.device_id}&months=12`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setData(res.data);
+    } catch {
+      // Tarife zaten kaydedildi; sadece tazeleme başarısız oldu.
+    }
+  }
+
+  async function downloadXlsx() {
+    setDownloading(true);
+    try {
+      const res = await axios.get(
+        `${API_BASE}/reports/bill?device_id=${device.device_id}&months=12&format=xlsx`,
+        { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${device.device_id}-fatura-analizi.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Excel indirilemedi.');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const rows = data?.rows || [];
+  const tariff = data?.tariff;
+  const summary = data?.summary;
+  const priced = summary?.priced;
+
+  const chartData = rows.map((r) => ({
+    label: monthLabel(r.bucket),
+    Gündüz: r.t1_kwh,
+    Puant: r.t2_kwh,
+    Gece: r.t3_kwh,
+    tepe: r.peak_kw,
+  }));
+
+  return (
+    <SectionCard
+      title="Fatura Analizi"
+      right={
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button type="button" onClick={downloadXlsx} disabled={downloading || rows.length === 0} style={{
+            padding: '6px 12px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--muted)', fontSize: 12, fontWeight: 600,
+            cursor: downloading || rows.length === 0 ? 'default' : 'pointer',
+          }}>{downloading ? 'İndiriliyor…' : 'Excel indir'}</button>
+          <button type="button" onClick={() => setSettingsOpen((o) => !o)} style={{
+            padding: '6px 12px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          }}>Tarife {settingsOpen ? '▲' : '▼'}</button>
+        </div>
+      }
+    >
+      {error && <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>}
+      {!error && data === null && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>}
+      {!error && data && rows.length === 0 && (
+        <div style={{ fontSize: 13, color: 'var(--muted)' }}>Bu aralıkta enerji verisi yok.</div>
+      )}
+
+      {!error && data && rows.length > 0 && (
+        <>
+          {/* Faturanın kalem kalem dökümü — asıl anlatılmak istenen şey bu */}
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+            {priced && (
+              <ReactiveStat
+                label="Toplam tahmini fatura"
+                value={money(summary.total_cost)}
+                hint={`${summary.month_count} ay · ${summary.total_kwh.toLocaleString('tr-TR')} kWh`}
+              />
+            )}
+            {priced && (
+              <ReactiveStat label="Aktif enerji" value={money(summary.total_active_cost)}
+                hint={summary.total_cost > 0
+                  ? `faturanın %${(summary.total_active_cost / summary.total_cost * 100).toFixed(0)}'i` : null} />
+            )}
+            {priced && (
+              <ReactiveStat label="Güç aşım bedeli" value={money(summary.total_demand_cost)}
+                hint={`${summary.overrun_months} ayda aşım`}
+                danger={summary.total_demand_cost > 0} />
+            )}
+            {priced && (
+              <ReactiveStat label="Reaktif ceza" value={money(summary.total_reactive_cost)}
+                danger={summary.total_reactive_cost > 0} />
+            )}
+            <ReactiveStat
+              label="Puant oranı"
+              value={summary.puant_pct != null ? `%${summary.puant_pct}` : '—'}
+              hint="pahalı dilimdeki tüketim"
+              danger={summary.puant_pct > 25}
+            />
+            {summary.peak_kw != null && (
+              <ReactiveStat
+                label="En yüksek tepe güç"
+                value={`${summary.peak_kw} kW`}
+                hint={tariff.contract_power_kw ? `sözleşme ${tariff.contract_power_kw} kW` : 'sözleşme gücü girilmedi'}
+                danger={tariff.contract_power_kw != null && summary.peak_kw > tariff.contract_power_kw}
+              />
+            )}
+          </div>
+
+          {!priced && (
+            <div style={{
+              fontSize: 12, color: 'var(--muted)', marginBottom: 16, padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+            }}>
+              Fatura tutarlarını görebilmek için <b>Tarife</b> bölümünden faturanızdaki birim fiyatları
+              ve sözleşme gücünüzü girin. Tüketim kırılımı fiyat girilmeden de çalışır.
+            </div>
+          )}
+
+          {summary.tou_enabled && summary.total_shift_saving > 0 && (
+            <div style={{
+              fontSize: 12, marginBottom: 16, padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid color-mix(in srgb, var(--accent) 40%, var(--border))',
+              background: 'color-mix(in srgb, var(--accent) 6%, transparent)',
+            }}>
+              Puanttaki tüketimin <b>tamamı</b> gece tarifesine kaysaydı bu dönemde{' '}
+              <b className="mono">{money(summary.total_shift_saving)}</b> daha az ödenirdi. Bu ulaşılabilir bir
+              hedef değil, tasarruf <b>tavanı</b> — yükün ne kadarını kaydırabildiğinize göre bunun bir kısmı gerçekleşir.
+            </div>
+          )}
+
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+              <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" />
+              <XAxis dataKey="label" tick={{ fontSize: 10, fill: 'var(--muted)' }} />
+              <YAxis yAxisId="kwh" tick={{ fontSize: 10, fill: 'var(--muted)' }} width={50} />
+              <YAxis yAxisId="kw" orientation="right" tick={{ fontSize: 10, fill: 'var(--muted)' }} width={45}
+                     tickFormatter={(v) => `${v}kW`} />
+              <Tooltip contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                       formatter={(val, name) => (name === 'tepe' ? `${val} kW` : `${val} kWh`)} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar yAxisId="kwh" dataKey="Gece" stackId="e" fill="var(--l3)" />
+              <Bar yAxisId="kwh" dataKey="Gündüz" stackId="e" fill="var(--l1)" />
+              <Bar yAxisId="kwh" dataKey="Puant" stackId="e" fill="var(--danger)" radius={[4, 4, 0, 0]} />
+              {tariff.contract_power_kw != null && (
+                <ReferenceLine yAxisId="kw" y={tariff.contract_power_kw} stroke="var(--accent)"
+                               strokeDasharray="4 4" />
+              )}
+              <Line yAxisId="kw" type="monotone" dataKey="tepe" name="tepe" stroke="var(--accent)"
+                    strokeWidth={2} dot={{ r: 3 }} connectNulls />
+            </ComposedChart>
+          </ResponsiveContainer>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+            Çubuklar aylık tüketimin zaman dilimlerine dağılımı; çizgi 15 dakikalık ortalamaya göre tepe güç.
+            {tariff.contract_power_kw != null && ' Kesikli çizgi sözleşme gücü — üstüne çıkan aylarda güç aşım bedeli doğar.'}
+          </div>
+
+          <div style={{ overflowX: 'auto', marginTop: 16 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 760 }}>
+              <thead>
+                <tr style={{ color: 'var(--muted)', textAlign: 'right' }}>
+                  <th style={{ textAlign: 'left', padding: '6px 8px' }}>Ay</th>
+                  <th style={{ padding: '6px 8px' }}>Gündüz</th>
+                  <th style={{ padding: '6px 8px' }}>Puant</th>
+                  <th style={{ padding: '6px 8px' }}>Gece</th>
+                  <th style={{ padding: '6px 8px' }}>Tepe Güç</th>
+                  <th style={{ padding: '6px 8px' }}>Aşım</th>
+                  {priced && <th style={{ padding: '6px 8px' }}>Aktif</th>}
+                  {priced && <th style={{ padding: '6px 8px' }}>Güç Aşım</th>}
+                  {priced && <th style={{ padding: '6px 8px' }}>Reaktif</th>}
+                  {priced && <th style={{ padding: '6px 8px' }}>Toplam</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {[...rows].reverse().map((r) => (
+                  <tr key={r.bucket} style={{ borderTop: '1px solid var(--border)' }}>
+                    <td style={{ padding: '7px 8px', fontWeight: 500 }}>{monthLabel(r.bucket)}</td>
+                    <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>{r.t1_kwh}</td>
+                    <td className="mono" style={{
+                      padding: '7px 8px', textAlign: 'right',
+                      color: r.puant_pct > 25 ? 'var(--danger)' : 'var(--ink)',
+                    }}>{r.t2_kwh}{r.puant_pct != null && <span style={{ color: 'var(--muted)' }}> (%{r.puant_pct})</span>}</td>
+                    <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>{r.t3_kwh}</td>
+                    <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>
+                      {r.peak_kw != null ? `${r.peak_kw} kW` : '—'}
+                    </td>
+                    <td className="mono" style={{
+                      padding: '7px 8px', textAlign: 'right',
+                      color: (r.overrun_kw || 0) > 0 ? 'var(--danger)' : 'var(--muted)',
+                      fontWeight: (r.overrun_kw || 0) > 0 ? 600 : 400,
+                    }}>{r.overrun_kw != null ? (r.overrun_kw > 0 ? `+${r.overrun_kw} kW` : '—') : '—'}</td>
+                    {priced && <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>{money(r.active_cost)}</td>}
+                    {priced && <td className="mono" style={{
+                      padding: '7px 8px', textAlign: 'right',
+                      color: r.demand_cost > 0 ? 'var(--danger)' : 'var(--muted)',
+                    }}>{r.demand_cost > 0 ? money(r.demand_cost) : '—'}</td>}
+                    {priced && <td className="mono" style={{
+                      padding: '7px 8px', textAlign: 'right',
+                      color: r.reactive_cost > 0 ? 'var(--danger)' : 'var(--muted)',
+                    }}>{r.reactive_cost > 0 ? money(r.reactive_cost) : '—'}</td>}
+                    {priced && <td className="mono" style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600 }}>
+                      {money(r.total_cost)}
+                    </td>}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {rows.some((r) => r.peak_time) && (
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10 }}>
+              Son dönemin tepe gücü{' '}
+              <b className="mono" style={{ color: 'var(--ink)' }}>
+                {new Date(rows[rows.length - 1].peak_time).toLocaleString('tr-TR',
+                  { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+              </b>{' '}
+              anında oluştu.
+            </div>
+          )}
+        </>
+      )}
+
+      {settingsOpen && tariff && (
+        <TariffForm token={token} device={device} tariff={tariff} onSaved={reloadSilently} />
+      )}
+    </SectionCard>
+  );
+}
+
 // ---------- Reaktif Ceza Analizi ----------
 const REACTIVE_PERIODS = [['monthly', 'Aylık'], ['daily', 'Günlük']];
 
@@ -2335,6 +2586,14 @@ function TariffForm({ token, device, tariff, onSaved }) {
     reactive_price: tariff.reactive_price,
     active_price: tariff.active_price,
     billing_mode: tariff.billing_mode,
+    t1_start: tariff.t1_start,
+    t2_start: tariff.t2_start,
+    t3_start: tariff.t3_start,
+    t1_price: tariff.t1_price,
+    t2_price: tariff.t2_price,
+    t3_price: tariff.t3_price,
+    contract_power_kw: tariff.contract_power_kw ?? '',
+    demand_price: tariff.demand_price,
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -2360,6 +2619,15 @@ function TariffForm({ token, device, tariff, onSaved }) {
         reactive_price: Number(form.reactive_price),
         active_price: Number(form.active_price),
         billing_mode: form.billing_mode,
+        t1_start: Number(form.t1_start),
+        t2_start: Number(form.t2_start),
+        t3_start: Number(form.t3_start),
+        t1_price: Number(form.t1_price),
+        t2_price: Number(form.t2_price),
+        t3_price: Number(form.t3_price),
+        // Bos birakilirsa sozlesme gucu "girilmedi" demek -- 0 degil null.
+        contract_power_kw: form.contract_power_kw === '' ? null : Number(form.contract_power_kw),
+        demand_price: Number(form.demand_price),
       }, { headers: { Authorization: `Bearer ${token}` } });
       setMsg('Kaydedildi.');
       onSaved();
@@ -2420,6 +2688,60 @@ function TariffForm({ token, device, tariff, onSaved }) {
           <input style={field} type="number" step="0.0001" value={form.active_price}
                  onChange={(e) => set('active_price', e.target.value)} />
         </div>
+        <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Üç Zamanlı Tarife</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+            Üç fiyatı da 0 bırakırsanız tek fiyatlı aktif birim fiyat kullanılır.
+          </div>
+        </div>
+        <div>
+          <label style={labelStyle}>Gündüz başlangıcı (saat)</label>
+          <input style={field} type="number" min="0" max="23" value={form.t1_start}
+                 onChange={(e) => set('t1_start', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Puant başlangıcı (saat)</label>
+          <input style={field} type="number" min="0" max="23" value={form.t2_start}
+                 onChange={(e) => set('t2_start', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Gece başlangıcı (saat)</label>
+          <input style={field} type="number" min="0" max="23" value={form.t3_start}
+                 onChange={(e) => set('t3_start', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Gündüz fiyatı (₺/kWh)</label>
+          <input style={field} type="number" step="0.0001" value={form.t1_price}
+                 onChange={(e) => set('t1_price', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Puant fiyatı (₺/kWh)</label>
+          <input style={field} type="number" step="0.0001" value={form.t2_price}
+                 onChange={(e) => set('t2_price', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Gece fiyatı (₺/kWh)</label>
+          <input style={field} type="number" step="0.0001" value={form.t3_price}
+                 onChange={(e) => set('t3_price', e.target.value)} />
+        </div>
+
+        <div style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 2 }}>Güç Aşımı</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>
+            Sözleşme gücünü boş bırakırsanız güç aşım analizi yapılmaz.
+          </div>
+        </div>
+        <div>
+          <label style={labelStyle}>Sözleşme gücü (kW)</label>
+          <input style={field} type="number" step="0.1" placeholder="girilmedi" value={form.contract_power_kw}
+                 onChange={(e) => set('contract_power_kw', e.target.value)} />
+        </div>
+        <div>
+          <label style={labelStyle}>Güç aşım bedeli (₺/kW)</label>
+          <input style={field} type="number" step="0.0001" value={form.demand_price}
+                 onChange={(e) => set('demand_price', e.target.value)} />
+        </div>
+
         <div style={{ gridColumn: '1 / -1' }}>
           <label style={labelStyle}>Ceza hesaplama yöntemi</label>
           <select style={field} value={form.billing_mode} onChange={(e) => set('billing_mode', e.target.value)}>
@@ -3504,6 +3826,7 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
       </div>
 
       <TrendSection token={token} device={device} />
+      <BillSection token={token} device={device} />
       <ReactiveSection token={token} device={device} />
       <StatsSection stats={stats} theme={theme} />
       <PeaksSection peaks={peaks} />
