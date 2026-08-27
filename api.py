@@ -856,6 +856,258 @@ def move_device(device_id: str, payload: MoveDeviceRequest, user: str = Depends(
     return {"message": "Cihaz taşındı"}
 
 
+class InviteRequest(BaseModel):
+    email: str
+    role: str
+    facility_ids: list[int] = []
+    department_ids: list[int] = []
+
+
+INVITE_VALID_DAYS = 7
+
+
+@app.post("/organization/invites")
+def create_invite(payload: InviteRequest, user: str = Depends(require_org_admin)):
+    if payload.role not in ORG_ROLES:
+        raise HTTPException(status_code=400, detail="Geçersiz rol")
+    email = payload.email.strip().lower()
+    if not EMAIL_RE.match(email) or len(email) > 254:
+        raise HTTPException(status_code=400, detail="Geçerli bir e-posta adresi girin")
+    check_rate_limit(f"invite:{user}", max_attempts=20, window_seconds=60 * 60)
+
+    membership = get_membership(user)
+    org_id = membership["organization_id"]
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+
+    # Zaten uye mi?
+    cur.execute("""
+        SELECT 1 FROM org_members m JOIN users u ON u.username = m.username
+        WHERE m.organization_id = %s AND lower(u.email) = %s
+    """, (org_id, email))
+    if cur.fetchone():
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Bu e-posta zaten organizasyonun üyesi")
+
+    # Kapsam id'lerini bu organizasyona ait olanlarla sinirla -- baska bir
+    # organizasyonun tesis id'si gonderilerek yetki sizmasi olmasin.
+    cur.execute("SELECT id FROM facilities WHERE organization_id = %s", (org_id,))
+    valid_facilities = {r[0] for r in cur.fetchall()}
+    cur.execute("""
+        SELECT dep.id FROM departments dep JOIN facilities f ON f.id = dep.facility_id
+        WHERE f.organization_id = %s
+    """, (org_id,))
+    valid_departments = {r[0] for r in cur.fetchall()}
+    facility_ids = [i for i in payload.facility_ids if i in valid_facilities]
+    department_ids = [i for i in payload.department_ids if i in valid_departments]
+
+    token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(days=INVITE_VALID_DAYS)
+    # Ayni adrese bekleyen davet varsa yenisiyle degistir
+    cur.execute(
+        "DELETE FROM org_invites WHERE organization_id = %s AND lower(email) = %s AND accepted_at IS NULL",
+        (org_id, email),
+    )
+    cur.execute("""
+        INSERT INTO org_invites (organization_id, email, role, facility_ids, department_ids,
+                                 token, invited_by, expires_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s) RETURNING id
+    """, (org_id, email, payload.role, facility_ids, department_ids, token, user, expires_at))
+    invite_id = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+
+    org_name = membership["organization_name"]
+    role_label = {
+        "org_admin": "Organizasyon Yöneticisi",
+        "facility_manager": "Tesis Sorumlusu",
+        "department_manager": "Bölüm Sorumlusu",
+    }.get(payload.role, payload.role)
+    invite_url = f"{SITE_URL}/davet?token={token}"
+    try:
+        resend.Emails.send({
+            "from": RESEND_FROM,
+            "to": [email],
+            "subject": f"{org_name} sizi Binary Enerji'ye davet etti",
+            "html": (
+                f"<p><b>{org_name}</b> organizasyonuna <b>{role_label}</b> olarak davet edildiniz.</p>"
+                f"<p><a href='{invite_url}'>Daveti kabul et</a></p>"
+                f"<p style='color:#666;font-size:13px'>Bu bağlantı {INVITE_VALID_DAYS} gün geçerlidir. "
+                f"Hesabınız yoksa önce üye olmanız istenecek — davetin gönderildiği "
+                f"<b>{email}</b> adresiyle kaydolun.</p>"
+            ),
+        })
+    except Exception as e:
+        logger.error("Davet e-postasi gonderilemedi: %s", e)
+        raise HTTPException(status_code=502, detail="Davet e-postası gönderilemedi, lütfen tekrar deneyin")
+
+    return {"id": invite_id, "email": email, "expires_at": expires_at.isoformat()}
+
+
+@app.get("/organization/invites")
+def list_invites(user: str = Depends(require_org_admin)):
+    membership = get_membership(user)
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, email, role, created_at, expires_at
+        FROM org_invites
+        WHERE organization_id = %s AND accepted_at IS NULL
+        ORDER BY created_at DESC
+    """, (membership["organization_id"],))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    now = datetime.now(timezone.utc)
+    return [
+        {
+            "id": r[0], "email": r[1], "role": r[2],
+            "created_at": r[3].isoformat(),
+            "expires_at": r[4].isoformat(),
+            "expired": r[4] < now,
+        }
+        for r in rows
+    ]
+
+
+@app.delete("/organization/invites/{invite_id}")
+def cancel_invite(invite_id: int, user: str = Depends(require_org_admin)):
+    membership = get_membership(user)
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute(
+        "DELETE FROM org_invites WHERE id = %s AND organization_id = %s",
+        (invite_id, membership["organization_id"]),
+    )
+    deleted = cur.rowcount
+    cur.close()
+    conn.close()
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Davet bulunamadı")
+    return {"message": "Davet iptal edildi"}
+
+
+@app.get("/invites/{token}")
+def preview_invite(token: str):
+    """Davet baglantisinin acilis sayfasi icin -- giris yapilmadan once
+    'hangi organizasyon, hangi rol' gosterilebilsin diye."""
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT i.email, i.role, i.expires_at, i.accepted_at, o.name
+        FROM org_invites i JOIN organizations o ON o.id = i.organization_id
+        WHERE i.token = %s
+    """, (token,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Davet bulunamadı")
+    email, role, expires_at, accepted_at, org_name = row
+    return {
+        "organization_name": org_name,
+        "email": email,
+        "role": role,
+        "expired": expires_at < datetime.now(timezone.utc),
+        "accepted": accepted_at is not None,
+    }
+
+
+class AcceptInviteRequest(BaseModel):
+    token: str
+
+
+@app.post("/organization/invites/accept")
+def accept_invite(payload: AcceptInviteRequest, user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, organization_id, email, role, facility_ids, department_ids, expires_at, accepted_at
+        FROM org_invites WHERE token = %s
+    """, (payload.token,))
+    row = cur.fetchone()
+    if not row:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Davet bulunamadı")
+    invite_id, org_id, invite_email, role, facility_ids, department_ids, expires_at, accepted_at = row
+    if accepted_at is not None:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Bu davet zaten kullanılmış")
+    if expires_at < datetime.now(timezone.utc):
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=400, detail="Davetin süresi dolmuş, yöneticinizden yeni davet isteyin")
+
+    # Davet e-postaya bagli: bagi baskasina iletilse bile kullanilamasin.
+    cur.execute("SELECT lower(email) FROM users WHERE username = %s", (user,))
+    user_email = (cur.fetchone() or [None])[0]
+    if not user_email or user_email != invite_email.lower():
+        cur.close()
+        conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail=f"Bu davet {invite_email} adresine gönderilmiş. Lütfen o adresle kayıtlı hesapla giriş yapın.",
+        )
+
+    # Kullanicinin mevcut uyeligi: kayit sirasinda herkese otomatik bir kisisel
+    # organizasyon aciliyor. O organizasyon bos ise (cihaz yok, tek uye) davet
+    # kabul edilirken guvenle birakilabilir. Dolu ise veri kaybi riski var, reddet.
+    cur.execute("SELECT id, organization_id FROM org_members WHERE username = %s", (user,))
+    existing = cur.fetchone()
+    if existing:
+        old_member_id, old_org_id = existing
+        if old_org_id == org_id:
+            cur.close()
+            conn.close()
+            raise HTTPException(status_code=400, detail="Zaten bu organizasyonun üyesisiniz")
+        cur.execute("""
+            SELECT (SELECT count(*) FROM devices d JOIN facilities f ON f.id = d.facility_id
+                    WHERE f.organization_id = %s),
+                   (SELECT count(*) FROM org_members WHERE organization_id = %s)
+        """, (old_org_id, old_org_id))
+        device_count, member_count = cur.fetchone()
+        if device_count > 0 or member_count > 1:
+            cur.close()
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail="Halihazırda cihazları olan bir organizasyondasınız. Daveti kabul etmek için "
+                       "önce mevcut organizasyonunuzdan ayrılmanız gerekir.",
+            )
+        # Bos kisisel organizasyon -- uyeligi ve organizasyonu temizle
+        cur.execute("DELETE FROM org_members WHERE id = %s", (old_member_id,))
+        cur.execute("DELETE FROM organizations WHERE id = %s", (old_org_id,))
+
+    cur.execute(
+        "INSERT INTO org_members (organization_id, username, role) VALUES (%s, %s, %s) RETURNING id",
+        (org_id, user, role),
+    )
+    member_id = cur.fetchone()[0]
+    for fid in (facility_ids or []):
+        cur.execute(
+            "INSERT INTO member_facilities (member_id, facility_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (member_id, fid),
+        )
+    for did in (department_ids or []):
+        cur.execute(
+            "INSERT INTO member_departments (member_id, department_id) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+            (member_id, did),
+        )
+    cur.execute("UPDATE org_invites SET accepted_at = now() WHERE id = %s", (invite_id,))
+    cur.execute("SELECT name FROM organizations WHERE id = %s", (org_id,))
+    org_name = cur.fetchone()[0]
+    cur.close()
+    conn.close()
+    return {"message": f"{org_name} organizasyonuna katıldınız", "organization_name": org_name}
+
+
 @app.patch("/organization/members/{member_id}")
 def update_member(member_id: int, payload: MemberRoleRequest, user: str = Depends(require_org_admin)):
     if payload.role not in ORG_ROLES:
