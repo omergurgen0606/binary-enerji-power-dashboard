@@ -562,6 +562,47 @@ Kullanıcı, uygulama içinde hesap ikonuna tıklandığında ayrı bir sayfa a�
 - iOS: `ProfileView`'a aynı alanlar + `PasswordChangeView` eklendi, cihaz sayısı `api.fetchDevices().count` ile ayrıca çekiliyor.
 - Android: `ProfileScreen`'e aynı alanlar + `PasswordChangeSection` eklendi; ekran artık kaydırılabilir + `imePadding()` (yeni eklenen alanlarla klavye taşması yaşanmasın diye, komut panelindeki düzeltmeyle aynı desen). Emulator'de gerçek tıklamalarla uçtan uca doğrulandı (eşleşmeyen şifre uyarısı UI'da göründü, yanlış-şifre denemesi backend'e gerçekten ulaşıp `403` döndüğü sunucu loglarından teyit edildi).
 
+
+### 5.10 Reaktif Ceza Analizi / Raporlama (27 Ağustos 2026)
+
+Sanayi abonesinin faturasında en çok canını yakan kalem reaktif ceza; cihaz zaten
+bunun için gereken kümülatif sayaçları (`device_energy`: aktif Wh, endüktif/kapasitif
+VArh) topluyordu, bu iş o sayaçları bir rapora çeviriyor.
+
+**Kural ve neden ayarlanabilir:** Türkiye'de reaktif bedel aylık toplamlar üzerinden
+işler — çekilen endüktif ve verilen kapasitif reaktif enerji, tüketilen aktif enerjinin
+belirli bir yüzdesini aşamaz; aşılırsa yaygın uygulamada sadece aşan kısım değil o ayki
+reaktifin **tamamı** faturalanır. Limitler abone grubuna (kurulu güç ≥50 kW / <50 kW),
+birim fiyatlar ise tarifeye göre değişiyor ve dönemsel güncelleniyor. Bu yüzden hiçbiri
+koda gömülmedi: `device_tariff` tablosunda cihaz bazında tutuluyor, müşteri kendi
+faturasındaki değerleri girerek kalibre ediyor. Hesaplama yöntemi de ("tamamı" /
+"yalnızca aşan kısım") aynı şekilde bir ayar.
+
+**Backend (`api.py`):**
+- Yeni tablo `device_tariff` (`ops/schema/2026-08-27-reactive-tariff.sql`).
+- `GET`/`PUT /devices/{id}/tariff` — ayarlar; `GET` yanıtı iki hazır limit setini
+  (`over_50kw` %20/%15, `under_50kw` %33/%20) `presets` olarak da döndürüyor.
+- `GET /reports/reactive?device_id=&period=monthly|daily&count=&format=json|xlsx`.
+- Farklar `GREATEST(delta, 0)` ile kırpılıyor: cihaz sayacı sıfırlandığında negatif
+  fark sahte devasa tüketim olarak okunmasın diye.
+- Dönemler `Europe/Istanbul`'a göre gruplanıyor — faturalama ayı yereldir, UTC değil.
+- Aşımı kapatacak kompanzasyon gücü tahmini: aşan kVArh / yük altında geçen saat sayısı.
+
+**Web / iOS / Android:** Üçünde de "Reaktif Ceza Analizi" bölümü — Aylık/Günlük
+geçişi, özet kartları (cezalı dönem sayısı, en yüksek oranlar, toplam ceza, önerilen
+kompanzasyon), limit çizgili oran grafiği ve dönem tablosu; tarife formu her platformda
+var, Excel indirme yalnızca web'de.
+
+**Doğrulama:** Gerçek cihaz verisiyle (anl21-8085d8, %155.4 endüktif) Android'de
+1,85 ₺/kVArh kaydedildi → 842 kVArh × 1,85 = **1.557,66 ₺** çıktı; aynı değer
+paylaşılan ayardan iOS'ta da göründü. Günlük kırılım (528,55 + 1.029,10 ₺) aylık
+toplamla tutuyor.
+
+**İki platform-özel tuzak:** Swift Charts'ta `LineMark`'a `series:` verilmezse aynı
+dönemdeki endüktif ve kapasitif noktalar tek seri sayılıp dikey bir çizgiyle
+birleştiriliyor. Android'de grafik Canvas'a elle çizildiği için x ekseni etiketleri de
+elle ekleniyor; 30 günlük görünümde üst üste binmesin diye seyreltiliyor.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
