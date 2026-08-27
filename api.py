@@ -116,7 +116,7 @@ app.add_middleware(
     # ama "*" gereksiz yere genisti -- gercek origin'lere daraltildi. localhost:5173
     # yerel Vite dev server icin (bu API'ye karsi test ederken kullaniliyor).
     allow_origins=[SITE_URL, "http://localhost:5173"],
-    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
