@@ -603,6 +603,64 @@ dönemdeki endüktif ve kapasitif noktalar tek seri sayılıp dikey bir çizgiyl
 birleştiriliyor. Android'de grafik Canvas'a elle çizildiği için x ekseni etiketleri de
 elle ekleniyor; 30 günlük görünümde üst üste binmesin diye seyreltiliyor.
 
+
+### 5.11 Veri Katmanı Ölçeklendirme — Sıkıştırma, Özet Tabloları, Saklama (27 Ağustos 2026)
+
+Sistemi ticari hale getirme turunda ilk ölçülen şey depolamaydı ve tek gerçek
+**satış engeli** buradan çıktı.
+
+**Sorun (ölçüldü, tahmin edilmedi):** `measurements` cihaz başına saatte ~1.580
+satır alıyor (satır ~337 byte) → **~12,8 MB/gün/cihaz ≈ 4,7 GB/yıl/cihaz**.
+Hiçbir tabloda sıkıştırma yoktu, hiçbir saklama politikası yoktu, yani büyüme
+sınırsızdı. Sunucuda (961 MB RAM, 1 çekirdek, 24 GB disk) 17 GB boş alan vardı:
+
+| Cihaz sayısı | Diskin dolma süresi (önce) |
+|---|---|
+| 3 | ~14 ay |
+| 10 | ~4 ay |
+| 50 | ~1 ay |
+
+Dolduğunda PostgreSQL yazmayı reddeder ve veri toplama **sessizce** ölür.
+
+**Çözüm üç parçalı:**
+
+1. **Sürekli toplamalar (continuous aggregate)** — ham satırları atılabilir kılan
+   şey bunlar, çünkü geçmişi sonsuza kadar bunlar tutuyor:
+   - `device_energy_hourly` — `/energy/hourly` ve reaktif ceza raporunu besliyor.
+   - `measurements_15min` — 15 dakikalık kova **bilinçli**: güç aşım (sözleşme
+     gücü) cezası Türkiye'de 15 dakikalık ortalama güç üzerinden hesaplanır, ve
+     gerilim/THD min-max'ları ileride güç kalitesi raporunda kullanılacak.
+2. **Sıkıştırma** (`segmentby = device_id`) + **saklama** (measurements 90 gün,
+   device_energy 180 gün, diğerleri 365 gün). Bugün hiçbir şey silmiyor;
+   büyümeyi sınırlı tutmak için şimdiden kuruldu.
+3. **Bileşik `(device_id, time DESC)` indeksleri** — tüm sorgular `device_id`
+   filtreliyordu ama indeks sadece `time` üzerindeydi, yani her sorgu tüm
+   cihazların satırlarını tarıyordu.
+
+**Yakalanan iki tuzak (ikisi de doğrulama sayesinde):**
+
+- **Saatlik özet başta sadece `last()` tutuyordu — bu yanlıştı.** Cihaz sayacı ön
+  panelden sıfırlanabiliyor; sıfırlanan saatte `last(H) < last(H-1)` olduğu için
+  fark negatif çıkıp sıfıra kırpılıyor ve **o saatin tüm tüketimi kayboluyordu**
+  (ölçülen örnekte 380 Wh'lik gerçek tüketim 0 görünüyordu). Özet artık saat
+  başına `first/last/max` üçünü birden tutuyor ve sıfırlanan saati
+  `(max − first) + last` ile yeniden kuruyor.
+- **`/energy/hourly` sıralaması sessizce tersine dönüyordu.** Gerçek zamanlı
+  sürekli toplama görünümü + pencere fonksiyonu bir aradayken planlayıcı dıştaki
+  `ORDER BY bucket DESC`'i düşürüyor. Sorgu alt sorguya sarılarak çözüldü.
+
+**Doğrulama:** Özet tablosunun ham veriyi birebir ürettiği kontrol edildi —
+46 saat karşılaştırıldı, **0 fark**, toplamlar Wh'ye kadar aynı (541.976 Wh);
+chunk'lar sıkıştırıldıktan sonra da aynı sonuç. Reaktif rapor migrasyon öncesi
+ve sonrası aynı rakamı veriyor (1.599,75 TL).
+
+**Sonuç:** Ölçülen sıkıştırma oranı **4,4 kat** — yavaş değişen telemetride
+görülen 10-20 kattan düşük, çünkü bunlar gerçekten gürültülü float ölçümler.
+Saklama politikasıyla birlikte **sınırsız 4,7 GB/yıl/cihaz büyüme, sınırlı
+~340 MB/cihaz sabit duruma** dönüyor. Sorgu tarafında `/reports/reactive`
+tampon okuması 101 → 8 sayfaya düştü (12 kat), ve bu fark 12 aylık gerçek
+veride çok daha büyük olacak.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
