@@ -2448,7 +2448,6 @@ function ReactiveSection({ token, device }) {
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -2459,7 +2458,24 @@ function ReactiveSection({ token, device }) {
     }).then((res) => { if (!cancelled) setData(res.data); })
       .catch(() => { if (!cancelled) setError('Reaktif analiz yüklenemedi.'); });
     return () => { cancelled = true; };
-  }, [device.device_id, period, token, reloadKey]);
+  }, [device.device_id, period, token]);
+
+  // Tarife kaydedildikten sonra raporu tazelemek icin ayri, "sessiz" bir
+  // yeniden yukleme -- data'yi once null'a cekmiyor. Aksi halde tum bolum
+  // aninda "Yukleniyor..." haline donup TariffForm unmount oluyor ve
+  // "Kaydedildi." mesaji goruluremeden kayboluyor.
+  async function reloadSilently() {
+    const count = period === 'monthly' ? 12 : 30;
+    try {
+      const res = await axios.get(`${API_BASE}/reports/reactive?device_id=${device.device_id}&period=${period}&count=${count}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setData(res.data);
+    } catch {
+      // Tarife zaten kaydedildi -- sadece rapor tazeleme basarisiz oldu,
+      // eski veriler ekranda kalmaya devam etsin.
+    }
+  }
 
   async function downloadXlsx() {
     setDownloading(true);
@@ -2645,7 +2661,7 @@ function ReactiveSection({ token, device }) {
       )}
 
       {settingsOpen && tariff && (
-        <TariffForm token={token} device={device} tariff={tariff} onSaved={() => setReloadKey((k) => k + 1)} />
+        <TariffForm token={token} device={device} tariff={tariff} onSaved={reloadSilently} />
       )}
     </SectionCard>
   );
