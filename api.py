@@ -2279,10 +2279,23 @@ TARIFF_DEFAULTS = {
     "reactive_price": 0.0,
     "active_price": 0.0,
     "billing_mode": "full",
+    # Uc zamanli tarife: T1 gunduz 06-17, T2 puant 17-22, T3 gece 22-06.
+    "t1_start": 6,
+    "t2_start": 17,
+    "t3_start": 22,
+    "t1_price": 0.0,
+    "t2_price": 0.0,
+    "t3_price": 0.0,
+    # Sozlesme gucu (kW) ve asan kW basina bedel.
+    "contract_power_kw": None,
+    "demand_price": 0.0,
 }
 BILLING_MODES = ("full", "excess")
 # Faturalama donemi yerel aya gore isler, UTC'ye gore degil.
 BILLING_TZ = "Europe/Istanbul"
+
+# Zaman dilimi etiketleri -- istemcilerde de ayni sirayla gosteriliyor.
+TOU_LABELS = {"t1": "Gündüz", "t2": "Puant", "t3": "Gece"}
 
 
 class TariffRequest(BaseModel):
@@ -2291,12 +2304,22 @@ class TariffRequest(BaseModel):
     reactive_price: float
     active_price: float
     billing_mode: str
+    t1_start: int = 6
+    t2_start: int = 17
+    t3_start: int = 22
+    t1_price: float = 0.0
+    t2_price: float = 0.0
+    t3_price: float = 0.0
+    contract_power_kw: float | None = None
+    demand_price: float = 0.0
 
 
 def _read_tariff(device_id: str, cur) -> dict:
     cur.execute("""
         SELECT inductive_limit_pct, capacitive_limit_pct, reactive_price,
-               active_price, billing_mode, updated_at
+               active_price, billing_mode, updated_at,
+               t1_start, t2_start, t3_start, t1_price, t2_price, t3_price,
+               contract_power_kw, demand_price
         FROM device_tariff WHERE device_id = %s
     """, (device_id,))
     row = cur.fetchone()
@@ -2309,6 +2332,14 @@ def _read_tariff(device_id: str, cur) -> dict:
         "active_price": float(row[3]),
         "billing_mode": row[4],
         "updated_at": row[5],
+        "t1_start": int(row[6]),
+        "t2_start": int(row[7]),
+        "t3_start": int(row[8]),
+        "t1_price": float(row[9]),
+        "t2_price": float(row[10]),
+        "t3_price": float(row[11]),
+        "contract_power_kw": float(row[12]) if row[12] is not None else None,
+        "demand_price": float(row[13]),
         "configured": True,
     }
 
@@ -2432,25 +2463,57 @@ def set_tariff(device_id: str, payload: TariffRequest, user: str = Depends(requi
         if not 0 < value <= 100:
             raise HTTPException(status_code=400, detail=f"{name} 0 ile 100 arasında olmalı")
     for name, value in (("Reaktif birim fiyat", payload.reactive_price),
-                        ("Aktif birim fiyat", payload.active_price)):
+                        ("Aktif birim fiyat", payload.active_price),
+                        ("Gündüz birim fiyat", payload.t1_price),
+                        ("Puant birim fiyat", payload.t2_price),
+                        ("Gece birim fiyat", payload.t3_price),
+                        ("Güç aşım birim bedeli", payload.demand_price)):
         if value < 0:
             raise HTTPException(status_code=400, detail=f"{name} negatif olamaz")
+    for name, value in (("Gündüz başlangıcı", payload.t1_start),
+                        ("Puant başlangıcı", payload.t2_start),
+                        ("Gece başlangıcı", payload.t3_start)):
+        if not 0 <= value <= 23:
+            raise HTTPException(status_code=400, detail=f"{name} 0 ile 23 arasında olmalı")
+    # Dilimler gun icinde artan sirada olmali, yoksa saat->dilim eslemesi
+    # bosluk/cakisma uretir.
+    if not payload.t1_start < payload.t2_start < payload.t3_start:
+        raise HTTPException(
+            status_code=400,
+            detail="Zaman dilimleri artan sırada olmalı (gündüz < puant < gece)")
+    if payload.contract_power_kw is not None and payload.contract_power_kw <= 0:
+        raise HTTPException(status_code=400, detail="Sözleşme gücü sıfırdan büyük olmalı")
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO device_tariff (device_id, inductive_limit_pct, capacitive_limit_pct,
-                                   reactive_price, active_price, billing_mode, updated_at, updated_by)
-        VALUES (%s, %s, %s, %s, %s, %s, now(), %s)
+                                   reactive_price, active_price, billing_mode,
+                                   t1_start, t2_start, t3_start,
+                                   t1_price, t2_price, t3_price,
+                                   contract_power_kw, demand_price,
+                                   updated_at, updated_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), %s)
         ON CONFLICT (device_id) DO UPDATE SET
             inductive_limit_pct = EXCLUDED.inductive_limit_pct,
             capacitive_limit_pct = EXCLUDED.capacitive_limit_pct,
             reactive_price = EXCLUDED.reactive_price,
             active_price = EXCLUDED.active_price,
             billing_mode = EXCLUDED.billing_mode,
+            t1_start = EXCLUDED.t1_start,
+            t2_start = EXCLUDED.t2_start,
+            t3_start = EXCLUDED.t3_start,
+            t1_price = EXCLUDED.t1_price,
+            t2_price = EXCLUDED.t2_price,
+            t3_price = EXCLUDED.t3_price,
+            contract_power_kw = EXCLUDED.contract_power_kw,
+            demand_price = EXCLUDED.demand_price,
             updated_at = now(),
             updated_by = EXCLUDED.updated_by
     """, (device_id, payload.inductive_limit_pct, payload.capacitive_limit_pct,
-          payload.reactive_price, payload.active_price, payload.billing_mode, user))
+          payload.reactive_price, payload.active_price, payload.billing_mode,
+          payload.t1_start, payload.t2_start, payload.t3_start,
+          payload.t1_price, payload.t2_price, payload.t3_price,
+          payload.contract_power_kw, payload.demand_price, user))
     conn.commit()
     cur.close()
     conn.close()
@@ -2569,6 +2632,259 @@ def _reactive_xlsx(device_id: str, period: str, rows: list[dict],
         content=buffer.getvalue(),
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+# ---------- Fatura analizi: zaman dilimi + guc asim + reaktif ----------
+# Sanayi aboneliginde fatura uc ayri kalemden sisiyor ve ucu de bu cihazin
+# zaten topladigi veriden hesaplanabiliyor:
+#   1) Aktif enerji, uc zaman diliminde farkli fiyattan (gunduz/puant/gece).
+#      Puant genelde gecenin ~3 kati; bir fabrikanin elindeki en buyuk tasarruf
+#      kaldiraci yuku puanttan geceye kaydirmak.
+#   2) Guc asim bedeli: 15 dakikalik ortalama guc sozlesme gucunu asarsa.
+#   3) Reaktif ceza (yukarida).
+# Bu endpoint ucunu tek bir aylik dokumde birlestiriyor.
+
+
+def _tou_buckets(device_id: str, tariff: dict, since, cur) -> dict:
+    """Ay bazinda zaman dilimi (T1/T2/T3) kirilimli aktif tuketim.
+
+    device_energy_hourly ozetinden okuyor; her saatin YEREL saatine bakip
+    hangi dilime dustugunu belirliyor. Saat sinirlari tarifeden geliyor.
+    """
+    cur.execute(f"""
+        WITH deltas AS (
+            SELECT
+                (bucket AT TIME ZONE %s) AS local_time,
+                {_hourly_delta_sql("active_tuketim", "active_wh_tuketim")} AS d_active
+            FROM device_energy_hourly
+            WHERE device_id = %s AND bucket >= %s
+            WINDOW w AS (ORDER BY bucket)
+        )
+        SELECT
+            date_trunc('month', local_time) AS ay,
+            SUM(d_active) FILTER (
+                WHERE EXTRACT(HOUR FROM local_time) >= %s
+                  AND EXTRACT(HOUR FROM local_time) <  %s) / 1000.0 AS t1_kwh,
+            SUM(d_active) FILTER (
+                WHERE EXTRACT(HOUR FROM local_time) >= %s
+                  AND EXTRACT(HOUR FROM local_time) <  %s) / 1000.0 AS t2_kwh,
+            SUM(d_active) FILTER (
+                WHERE EXTRACT(HOUR FROM local_time) <  %s
+                   OR EXTRACT(HOUR FROM local_time) >= %s) / 1000.0 AS t3_kwh
+        FROM deltas
+        GROUP BY ay
+    """, (BILLING_TZ, device_id, since,
+          tariff["t1_start"], tariff["t2_start"],
+          tariff["t2_start"], tariff["t3_start"],
+          tariff["t1_start"], tariff["t3_start"]))
+    return {
+        r[0]: {"t1_kwh": float(r[1] or 0), "t2_kwh": float(r[2] or 0), "t3_kwh": float(r[3] or 0)}
+        for r in cur.fetchall()
+    }
+
+
+def _demand_buckets(device_id: str, since, cur) -> dict:
+    """Ay bazinda tepe talep (15 dakikalik ortalama gucun aylik maksimumu).
+
+    15 dakika keyfi degil: guc asim bedeli bu aralik uzerinden hesaplanir.
+    measurements_15min surekli toplamasi zaten bu araliga gore kuruldu.
+    Tepenin NE ZAMAN olustugu da donuyor -- musteri icin en eyleme donuk bilgi
+    genelde bu ("tepe guc 14 Agustos 15:45'te olustu").
+    """
+    cur.execute("""
+        WITH m AS (
+            SELECT (bucket AT TIME ZONE %s) AS local_time, avg_total_p, avg_total_s
+            FROM measurements_15min
+            WHERE device_id = %s AND bucket >= %s
+        ),
+        siralanmis AS (
+            SELECT date_trunc('month', local_time) AS ay, local_time, avg_total_p, avg_total_s,
+                   ROW_NUMBER() OVER (PARTITION BY date_trunc('month', local_time)
+                                      ORDER BY avg_total_p DESC) AS sira
+            FROM m
+        )
+        SELECT ay, avg_total_p / 1000.0 AS peak_kw, avg_total_s / 1000.0 AS peak_kva, local_time
+        FROM siralanmis WHERE sira = 1
+    """, (BILLING_TZ, device_id, since))
+    return {
+        r[0]: {"peak_kw": round(float(r[1] or 0), 2),
+               "peak_kva": round(float(r[2] or 0), 2),
+               "peak_time": r[3]}
+        for r in cur.fetchall()
+    }
+
+
+def _analyze_bill_month(bucket, tou: dict, demand: dict, reactive: dict | None,
+                        tariff: dict) -> dict:
+    t1, t2, t3 = tou["t1_kwh"], tou["t2_kwh"], tou["t3_kwh"]
+    total_kwh = t1 + t2 + t3
+
+    # Uc zamanli fiyat girilmemisse tek fiyatli active_price'a dusuyoruz.
+    tou_enabled = any(tariff[k] > 0 for k in ("t1_price", "t2_price", "t3_price"))
+    if tou_enabled:
+        t1_cost = t1 * tariff["t1_price"]
+        t2_cost = t2 * tariff["t2_price"]
+        t3_cost = t3 * tariff["t3_price"]
+    else:
+        t1_cost = t1 * tariff["active_price"]
+        t2_cost = t2 * tariff["active_price"]
+        t3_cost = t3 * tariff["active_price"]
+    active_cost = t1_cost + t2_cost + t3_cost
+
+    # Puant orani ve teorik tasarruf tavani: puantta tuketilen enerjinin
+    # tamami gece tarifesinde tuketilseydi ne kadar az odenirdi. Ulasilabilir
+    # bir hedef degil, ust sinir -- arayuzde de oyle etiketleniyor.
+    puant_pct = round(t2 / total_kwh * 100, 1) if total_kwh > 0 else None
+    max_shift_saving = round(t2 * max(tariff["t2_price"] - tariff["t3_price"], 0), 2) if tou_enabled else 0.0
+
+    # Guc asim
+    peak = demand or {}
+    contract = tariff["contract_power_kw"]
+    peak_kw = peak.get("peak_kw")
+    overrun_kw = None
+    demand_cost = 0.0
+    if contract is not None and peak_kw is not None:
+        overrun_kw = round(max(peak_kw - contract, 0.0), 2)
+        demand_cost = round(overrun_kw * tariff["demand_price"], 2)
+
+    reactive_cost = reactive["penalty_cost"] if reactive else 0.0
+
+    return {
+        "bucket": bucket,
+        "t1_kwh": round(t1, 2), "t2_kwh": round(t2, 2), "t3_kwh": round(t3, 2),
+        "t1_cost": round(t1_cost, 2), "t2_cost": round(t2_cost, 2), "t3_cost": round(t3_cost, 2),
+        "active_kwh": round(total_kwh, 2),
+        "active_cost": round(active_cost, 2),
+        "puant_pct": puant_pct,
+        "max_shift_saving": max_shift_saving,
+        "peak_kw": peak_kw,
+        "peak_kva": peak.get("peak_kva"),
+        "peak_time": peak.get("peak_time"),
+        "contract_power_kw": contract,
+        "overrun_kw": overrun_kw,
+        "demand_cost": demand_cost,
+        "reactive_cost": round(reactive_cost, 2),
+        "inductive_pct": reactive["inductive_pct"] if reactive else None,
+        "capacitive_pct": reactive["capacitive_pct"] if reactive else None,
+        "reactive_over": bool(reactive and (reactive["inductive_over"] or reactive["capacitive_over"])),
+        "total_cost": round(active_cost + demand_cost + reactive_cost, 2),
+    }
+
+
+@app.get("/reports/bill")
+def bill_report(device_id: str, months: int = 12, format: str = "json",
+                user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    months = max(1, min(months, 36))
+    since = datetime.now(timezone.utc) - timedelta(days=31 * months)
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    tariff = _read_tariff(device_id, cur)
+    tou = _tou_buckets(device_id, tariff, since, cur)
+    demand = _demand_buckets(device_id, since, cur)
+    # Reaktif kalemini mevcut analizden aliyoruz -- ayni hesabi ikinci kez
+    # yazmamak icin; boylece iki rapor arasinda tutarsizlik olusamaz.
+    reactive_rows = {
+        r["bucket"]: r
+        for r in (_analyze_bucket(b, tariff)
+                  for b in _reactive_buckets(device_id, "month", since, cur))
+    }
+    cur.close()
+    conn.close()
+
+    rows = [
+        _analyze_bill_month(ay, tou[ay], demand.get(ay), reactive_rows.get(ay), tariff)
+        for ay in sorted(tou.keys())
+    ][-months:]
+
+    priced = tariff["active_price"] > 0 or any(
+        tariff[k] > 0 for k in ("t1_price", "t2_price", "t3_price"))
+    summary = {
+        "month_count": len(rows),
+        "priced": priced,
+        "tou_enabled": any(tariff[k] > 0 for k in ("t1_price", "t2_price", "t3_price")),
+        "total_kwh": round(sum(r["active_kwh"] for r in rows), 2),
+        "total_active_cost": round(sum(r["active_cost"] for r in rows), 2),
+        "total_demand_cost": round(sum(r["demand_cost"] for r in rows), 2),
+        "total_reactive_cost": round(sum(r["reactive_cost"] for r in rows), 2),
+        "total_cost": round(sum(r["total_cost"] for r in rows), 2),
+        "total_shift_saving": round(sum(r["max_shift_saving"] for r in rows), 2),
+        "t1_kwh": round(sum(r["t1_kwh"] for r in rows), 2),
+        "t2_kwh": round(sum(r["t2_kwh"] for r in rows), 2),
+        "t3_kwh": round(sum(r["t3_kwh"] for r in rows), 2),
+        "peak_kw": max((r["peak_kw"] for r in rows if r["peak_kw"] is not None), default=None),
+        "overrun_months": sum(1 for r in rows if (r["overrun_kw"] or 0) > 0),
+    }
+    if summary["total_kwh"] > 0:
+        summary["puant_pct"] = round(summary["t2_kwh"] / summary["total_kwh"] * 100, 1)
+    else:
+        summary["puant_pct"] = None
+
+    if format == "xlsx":
+        return _bill_xlsx(device_id, rows, summary, tariff)
+
+    return {"device_id": device_id, "tariff": tariff, "rows": rows, "summary": summary}
+
+
+def _bill_xlsx(device_id: str, rows: list[dict], summary: dict, tariff: dict) -> Response:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Fatura Analizi"
+
+    for label, value in (
+        ("Cihaz", device_id),
+        ("Rapor tarihi", datetime.now().strftime("%d.%m.%Y %H:%M")),
+        ("Gündüz", f"{tariff['t1_start']:02d}:00-{tariff['t2_start']:02d}:00 · {tariff['t1_price']:g} TL/kWh"),
+        ("Puant", f"{tariff['t2_start']:02d}:00-{tariff['t3_start']:02d}:00 · {tariff['t2_price']:g} TL/kWh"),
+        ("Gece", f"{tariff['t3_start']:02d}:00-{tariff['t1_start']:02d}:00 · {tariff['t3_price']:g} TL/kWh"),
+        ("Sözleşme gücü", f"{tariff['contract_power_kw']:g} kW" if tariff["contract_power_kw"] else "girilmedi"),
+        ("Güç aşım bedeli", f"{tariff['demand_price']:g} TL/kW"),
+    ):
+        ws.append([label, value])
+        ws.cell(row=ws.max_row, column=1).font = Font(bold=True)
+    ws.append([])
+
+    headers = ["Ay", "Gündüz (kWh)", "Puant (kWh)", "Gece (kWh)", "Toplam (kWh)",
+               "Puant %", "Aktif Bedel (TL)",
+               "Tepe Güç (kW)", "Tepe Zamanı", "Sözleşme (kW)", "Aşım (kW)", "Güç Aşım (TL)",
+               "Endüktif %", "Kapasitif %", "Reaktif Ceza (TL)",
+               "TOPLAM (TL)", "Puant→Gece Tasarruf Tavanı (TL)"]
+    header_row = ws.max_row + 1
+    ws.append(headers)
+    for cell in ws[header_row]:
+        cell.font = Font(bold=True)
+
+    for r in rows:
+        ws.append([
+            r["bucket"].strftime("%m.%Y"),
+            r["t1_kwh"], r["t2_kwh"], r["t3_kwh"], r["active_kwh"],
+            r["puant_pct"], r["active_cost"],
+            r["peak_kw"], r["peak_time"].strftime("%d.%m.%Y %H:%M") if r["peak_time"] else None,
+            r["contract_power_kw"], r["overrun_kw"], r["demand_cost"],
+            r["inductive_pct"], r["capacitive_pct"], r["reactive_cost"],
+            r["total_cost"], r["max_shift_saving"],
+        ])
+
+    total_row = ws.max_row + 1
+    ws.append(["TOPLAM", summary["t1_kwh"], summary["t2_kwh"], summary["t3_kwh"],
+               summary["total_kwh"], summary["puant_pct"], summary["total_active_cost"],
+               summary["peak_kw"], None, None, None, summary["total_demand_cost"],
+               None, None, summary["total_reactive_cost"],
+               summary["total_cost"], summary["total_shift_saving"]])
+    for cell in ws[total_row]:
+        cell.font = Font(bold=True)
+
+    for i, header in enumerate(headers, start=1):
+        ws.column_dimensions[ws.cell(row=header_row, column=i).column_letter].width = max(13, len(header) * 1.05)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{device_id}-fatura-analizi.xlsx"'},
     )
 
 # ---------- WebSocket: Canlı veri ----------
