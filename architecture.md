@@ -699,6 +699,16 @@ tek başına çalışan reaktif raporuyla birebir aynı. Uç durumlar: fiyat/sö
 gücü girilmemiş cihaz sadece tüketim kırılımı gösteriyor, ters sıralı dilim
 saatleri ve pozitif olmayan sözleşme gücü reddediliyor.
 
+**Sonradan çıkan yapılandırma hatası (28 Ağustos 2026):** 5.11'de 16 politika
+aynı anda oluşturulunca hepsi aynı saniyede çalışmaya kalkıp
+`failed to start a background worker` hatası verdi. Sebep:
+`timescaledb.max_background_workers = 16` iken `max_worker_processes = 8` idi —
+TimescaleDB'nin şartı `max_worker_processes >= arka plan + paralel + 1`. İşler
+yeniden denenip başarılı oldu, ama bu sessizce tekrar edecek ve cihaz sayısı
+artınca sıkıştırma/saklama politikaları fark edilmeden geri kalacaktı.
+`ops/schema/2026-08-28-postgres-arka-plan-iscileri.sql` ile düzeltildi; tek
+çekirdekli sunucuda paralel sorgu ayarları da düşürüldü.
+
 **Ticari not:** Test cihazında bu üçlü şunu ortaya çıkardı — faturanın
 **%57'si ceza** (reaktif %39, güç aşımı %18). Ürünün satış argümanı tam olarak
 bu tablo.
