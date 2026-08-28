@@ -916,6 +916,52 @@ engelliyor ve yan etki bırakmıyor; uzatma canlı aboneliğe 180 gün ekliyor
 (değiştirmiyor); denetim izi eylem başına tek kayıt ve doğru tutar tutuyor
 (3 cihaz × 4.500 = 13.500 ₺).
 
+
+### 5.17 Sunucu Kapasitesi — Bağlantı Havuzu ve Swap (28 Ağustos 2026)
+
+Değiştirmeden önce ölçüldü ve **asıl darboğazın RAM veya CPU olmadığı** çıktı —
+sunucu yük 0.04 ile boşta duruyordu. Sınır **veritabanı bağlantılarıydı**.
+
+**Ölçülen sorun:** Her istek yeni bağlantı açıyordu, korumalı istekler ikişer
+(`require_subscription` + uç noktanın kendisi), ve panel bir açılışta ~12-15
+istek atıyor. `max_connections=25`'e karşı bu, **tek kullanıcıyla bile sınırın
+kenarıydı**: 30 eş zamanlı denemenin 6'sı `sorry, too many clients already` ile
+düştü, ve her bağlantı kurmak **22,7 ms** sürüyordu.
+
+**Çözüm daha büyük sunucu değil, havuz.** `maxconn` bilinçli olarak **düşük**
+(12): her PostgreSQL backend'i ~8 MB tutuyor ve makinede 961 MB var — amaç daha
+fazla backend değil, **daha az backend'i paylaştırmak**. Kalan kontenjan MQTT
+thread'inin uzun ömürlü bağlantısına, arka plan işlerine ve yönetim erişimine
+bırakıldı.
+
+Havuzlanan bağlantı, `close()` çağrısında kapatmak yerine havuza geri veren ince
+bir sarmalayıcı — böylece mevcut **74 çağrı yeri değiştirilmeden** çalışıyor.
+Geri vermeden önce `rollback()` yapıyor: yarım kalmış bir işlemi bir sonraki
+çağırana devretmek, tam da havuzlamanın getirdiği türden bir hatadır. MQTT
+thread'i doğrudan bağlantısını koruyor (sonsuza kadar tutuyor ve autocommit —
+havuzdan bir bağlantıyı orada park etmek havuzu daraltırdı).
+
+**Swap eklendi (2 GB, `swappiness=10`).** Makinede hiç swap yoktu; herhangi bir
+bellek sıçraması doğrudan OOM killer'a gidiyordu ve o da en büyük süreci —
+PostgreSQL'i — öldürüp veri toplamayı durdururdu. Bu bir performans katmanı
+değil, çökme sigortası.
+
+**Sonuç (ölçüldü):**
+
+| | Önce | Sonra |
+|---|---|---|
+| 60 eş zamanlı istek | 30'un 6'sı düşüyordu | 60/60 başarılı |
+| Bağlantı alma | 22,7 ms | 0,01 ms |
+| Açık backend | 25'e dayanıyor | 4 |
+
+**Yeni tavan disk.** Yazma kapasitesi 746 satır/sn, gerçek cihaz hızı
+0,44 satır/sn — yani veri alımı sınır değil. Cihaz başına ~340 MB kararlı durum
+ve 14 GB boş alanla **~40 cihaz**. Bu sayıya yaklaşıldığında sunucu yükseltmesi
+gerekir; öncesinde gerekmez.
+
+Sağlık kontrolü artık **%80 disk / %90 bellek** eşiklerinde uyarıyor — "disk
+doldu, veri toplama durdu" diye öğrenmek en kötü senaryo.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
