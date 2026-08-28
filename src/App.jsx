@@ -164,23 +164,42 @@ function AuthForm({ onLogin }) {
             <img src="/logo.png" alt="" style={{ height: 30 }} />
             <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, letterSpacing: 2 }}>BINARY ENERJİ</span>
           </div>
-          <h1 style={{ color: '#fff', fontSize: 34, fontWeight: 700, lineHeight: 1.25, margin: '0 0 16px' }}>
-            Enerjinizi<br />gerçek zamanlı izleyin.
+          <h1 style={{ color: '#fff', fontSize: 32, fontWeight: 700, lineHeight: 1.22, margin: '0 0 14px' }}>
+            Faturanızın neresinden<br />kaybediyorsunuz?
           </h1>
-          <p style={{ color: 'rgba(255,255,255,0.65)', fontSize: 15, lineHeight: 1.6, margin: '0 0 32px', maxWidth: 360 }}>
-            Gerilim, akım ve güç verilerinizi saniyeler içinde görün; enerji tüketiminizi geçmişe dönük analiz edin.
+          <p style={{ color: 'rgba(255,255,255,0.68)', fontSize: 15, lineHeight: 1.55, margin: '0 0 26px', maxWidth: 370 }}>
+            Reaktif ceza, güç aşımı ve puant tüketimi — sanayi elektrik faturasının
+            en pahalı kalemleri. Analizör ölçer, panel kalem kalem gösterir ve
+            ne yapmanız gerektiğini rakamla söyler.
           </p>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
             {[
-              'Canlı gerilim, akım ve güç faktörü',
-              'Saatlik tüketim / üretim raporları',
-              'Cihaz bağlantı durumu anlık takip',
-            ].map((t) => (
-              <div key={t} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--l2)', flexShrink: 0 }} />
-                <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{t}</span>
+              ['Reaktif ceza analizi', 'limiti ne kadar aştığınız, kaç kVAr kompanzasyon gerektiği'],
+              ['Güç aşımı takibi', 'sözleşme gücünüzü hangi an, ne kadar aştığınız'],
+              ['Puant / gündüz / gece kırılımı', 'pahalı saatlerdeki tüketiminiz ve kaydırma potansiyeli'],
+              ['Aylık PDF rapor', 'e-posta ile gelen fatura dökümü ve öneriler'],
+              ['Anlık alarm', 'e-posta ve telefon bildirimi'],
+              ['Güç kalitesi (EN 50160)', 'gerilim, frekans ve harmonik değerlendirmesi'],
+            ].map(([baslik, aciklama]) => (
+              <div key={baslik} style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                <span style={{
+                  width: 6, height: 6, borderRadius: '50%', background: 'var(--l2)',
+                  flexShrink: 0, marginTop: 6,
+                }} />
+                <span style={{ fontSize: 13, lineHeight: 1.45 }}>
+                  <span style={{ color: '#fff', fontWeight: 600 }}>{baslik}</span>
+                  <span style={{ color: 'rgba(255,255,255,0.6)' }}> — {aciklama}</span>
+                </span>
               </div>
             ))}
+          </div>
+          <div style={{
+            marginTop: 24, paddingTop: 18,
+            borderTop: '1px solid rgba(255,255,255,0.15)',
+            color: 'rgba(255,255,255,0.55)', fontSize: 12, lineHeight: 1.5, maxWidth: 370,
+          }}>
+            Gerilim, akım ve güç verileri saniyeler içinde; geçmiş tüketim ay ay,
+            gün gün. ANL13 ve ANL21 analizörleriyle çalışır.
           </div>
         </div>
 
