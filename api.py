@@ -366,6 +366,27 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
     if membership["role"] == "department_manager":
         raise HTTPException(status_code=403, detail="Bölüm sorumluları cihaz ekleyemez")
 
+    # Abonelik cihaz limiti. Cihaz basina ucretlendirildigi icin, satilandan
+    # fazla cihaz eklenmesini burada engelliyoruz. Limit NULL ise sinirsiz.
+    _sub_conn = psycopg2.connect(**DB_CONFIG)
+    _sub_cur = _sub_conn.cursor()
+    try:
+        _state = subscription_state(membership["organization_id"], _sub_cur)
+        if _state["device_limit"] is not None:
+            _sub_cur.execute("""
+                SELECT count(*) FROM devices d
+                JOIN facilities f ON f.id = d.facility_id
+                WHERE f.organization_id = %s
+            """, (membership["organization_id"],))
+            if _sub_cur.fetchone()[0] >= _state["device_limit"]:
+                raise HTTPException(
+                    status_code=402,
+                    detail=f"Abonelik cihaz limitiniz ({_state['device_limit']}) doldu. "
+                           f"Daha fazla cihaz eklemek için bizimle iletişime geçin.")
+    finally:
+        _sub_cur.close()
+        _sub_conn.close()
+
     facility_id = resolve_target_facility(membership, payload.facility_id)
     department_id = payload.department_id
     if department_id is not None and not department_belongs_to(department_id, facility_id):
@@ -1212,6 +1233,280 @@ def remove_member(member_id: int, user: str = Depends(require_org_admin)):
     return {"message": "Üye çıkarıldı"}
 
 
+# ---------- Abonelik ----------
+# Cihaz basina ucretli, fatura/havale ile odenen, yonetici panelinden ELLE
+# aktive edilen abonelik. Odeme saglayicisi entegrasyonu yok -- sema ondan
+# bagimsiz tutuldu ki ileride iyzico/PayTR eklendiginde bu katman degismesin.
+#
+# SURE BITTIGINDE veri toplama DURMAZ: MQTT akisi ve alarm degerlendirmesi
+# etkilenmiyor, yalnizca panelin veri ucnoktalari kilitleniyor. Musterinin
+# gecmisini kaybettirmek geri donusu degersiz kilardi.
+
+TRIAL_DAYS = 30
+# Bitise bu kadar kala arayuz uyari gostersin.
+SUBSCRIPTION_WARN_DAYS = 14
+SUBSCRIPTION_STATUSES = ("trial", "active", "cancelled")
+
+
+def _subscription_row(organization_id: int, cur) -> dict | None:
+    cur.execute("""
+        SELECT status, device_price, period, valid_until, device_limit, note, updated_at
+        FROM subscriptions WHERE organization_id = %s
+    """, (organization_id,))
+    r = cur.fetchone()
+    if not r:
+        return None
+    return {"status": r[0], "device_price": float(r[1]), "period": r[2],
+            "valid_until": r[3], "device_limit": r[4], "note": r[5], "updated_at": r[6]}
+
+
+def subscription_state(organization_id: int, cur) -> dict:
+    """Aboneligin ETKIN durumu.
+
+    'expired' veritabaninda saklanmiyor, her istekte valid_until'den
+    hesaplaniyor: zamanlanmis bir is calismadi diye suresi dolmus bir abonelik
+    yanlislikla acik kalmasin.
+    """
+    row = _subscription_row(organization_id, cur)
+    if row is None:
+        # Aboneligi hic olusturulmamis organizasyon (ornegin gocten once
+        # kalmis bir kayit) -- kilitlemek yerine deneme suresi veriyoruz.
+        return {"status": "none", "active": False, "valid_until": None,
+                "days_left": None, "device_price": 0.0, "period": "yearly",
+                "device_limit": None, "note": None, "warn": False}
+
+    now = datetime.now(timezone.utc)
+    valid_until = row["valid_until"]
+    suresi_var = valid_until is not None and valid_until > now
+
+    if row["status"] == "cancelled":
+        etkin = "cancelled"
+    elif not suresi_var:
+        etkin = "expired"
+    else:
+        etkin = row["status"]  # 'trial' veya 'active'
+
+    days_left = None
+    if valid_until is not None:
+        days_left = max(0, (valid_until - now).days)
+
+    return {
+        "status": etkin,
+        "active": etkin in ("trial", "active"),
+        "valid_until": valid_until,
+        "days_left": days_left,
+        "device_price": row["device_price"],
+        "period": row["period"],
+        "device_limit": row["device_limit"],
+        "note": row["note"],
+        "warn": etkin in ("trial", "active") and days_left is not None
+                and days_left <= SUBSCRIPTION_WARN_DAYS,
+    }
+
+
+def ensure_subscription(organization_id: int, cur, created_by: str = "system"):
+    """Yeni organizasyona deneme aboneligi acar. Zaten varsa hicbir sey yapmaz.
+
+    RETURNING ile gercekten olusturulup olusturulmadigini ayirt ediyoruz:
+    aksi halde her yonetici guncellemesinde denetim izine sahte bir 'created'
+    kaydi dusuyordu ve iz, tahsilat mutabakati icin guvenilmez hale geliyordu.
+    """
+    cur.execute("""
+        INSERT INTO subscriptions (organization_id, status, valid_until, updated_by)
+        VALUES (%s, 'trial', now() + (%s * INTERVAL '1 day'), %s)
+        ON CONFLICT (organization_id) DO NOTHING
+        RETURNING valid_until
+    """, (organization_id, TRIAL_DAYS, created_by))
+    row = cur.fetchone()
+    if row is None:
+        return
+    cur.execute("""
+        INSERT INTO subscription_events (organization_id, action, valid_until, note, created_by)
+        VALUES (%s, 'created', %s, %s, %s)
+    """, (organization_id, row[0], f"{TRIAL_DAYS} günlük deneme", created_by))
+
+
+def require_subscription(user: str = Depends(require_auth)) -> str:
+    """Panelin VERI ucnoktalarini korur.
+
+    Bilincli olarak korunmayanlar: /me, /devices, /organization, /subscription
+    ve kimlik dogrulama. Kilitli musteri de neden kilitli oldugunu gorebilmeli
+    ve cihaz listesi bos bir ekranla karsilasmamali.
+    """
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT organization_id FROM org_members WHERE username = %s LIMIT 1", (user,))
+        row = cur.fetchone()
+        if not row:
+            return user  # organizasyonu olmayan kullanici -- erisim zaten bos doner
+        state = subscription_state(row[0], cur)
+    finally:
+        cur.close()
+        conn.close()
+    if not state["active"]:
+        raise HTTPException(
+            status_code=402,
+            detail="Aboneliğiniz sona erdi. Verileriniz korunuyor; erişimi yeniden "
+                   "açmak için bizimle iletişime geçin.",
+        )
+    return user
+
+
+@app.get("/subscription")
+def get_subscription(user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT organization_id FROM org_members WHERE username = %s LIMIT 1", (user,))
+        row = cur.fetchone()
+        if not row:
+            return {"status": "none", "active": False}
+        state = subscription_state(row[0], cur)
+        cur.execute("""
+            SELECT count(*) FROM devices d
+            JOIN facilities f ON f.id = d.facility_id
+            WHERE f.organization_id = %s
+        """, (row[0],))
+        state["device_count"] = cur.fetchone()[0]
+    finally:
+        cur.close()
+        conn.close()
+    return state
+
+
+# ---------- Yönetici: abonelik yönetimi ----------
+
+class SubscriptionUpdate(BaseModel):
+    status: str = "active"
+    months: int | None = None       # valid_until'i bugunden itibaren uzatir
+    valid_until: str | None = None  # ya da dogrudan tarih (ISO)
+    device_price: float | None = None
+    period: str | None = None
+    device_limit: int | None = None
+    note: str | None = None
+
+
+@app.get("/admin/subscriptions")
+def admin_list_subscriptions(user: str = Depends(require_admin)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT o.id, o.name,
+               count(DISTINCT d.device_id) AS cihaz,
+               count(DISTINCT m.username) AS uye
+        FROM organizations o
+        LEFT JOIN facilities f ON f.organization_id = o.id
+        LEFT JOIN devices d ON d.facility_id = f.id
+        LEFT JOIN org_members m ON m.organization_id = o.id
+        GROUP BY o.id, o.name ORDER BY o.name
+    """)
+    orgs = cur.fetchall()
+    out = []
+    for org_id, name, cihaz, uye in orgs:
+        state = subscription_state(org_id, cur)
+        out.append({
+            "organization_id": org_id, "name": name,
+            "device_count": cihaz, "member_count": uye,
+            **{k: v for k, v in state.items() if k != "warn"},
+            # Fatura tutari: cihaz sayisi x birim fiyat.
+            "amount": round(cihaz * state["device_price"], 2),
+        })
+    cur.close()
+    conn.close()
+    return out
+
+
+@app.put("/admin/subscriptions/{organization_id}")
+def admin_update_subscription(organization_id: int, payload: SubscriptionUpdate,
+                              user: str = Depends(require_admin)):
+    if payload.status not in SUBSCRIPTION_STATUSES:
+        raise HTTPException(status_code=400, detail="Geçersiz abonelik durumu")
+    if payload.period is not None and payload.period not in ("monthly", "yearly"):
+        raise HTTPException(status_code=400, detail="Geçersiz dönem")
+    if payload.months is not None and not 1 <= payload.months <= 120:
+        raise HTTPException(status_code=400, detail="Süre 1 ile 120 ay arasında olmalı")
+    if payload.device_price is not None and payload.device_price < 0:
+        raise HTTPException(status_code=400, detail="Birim fiyat negatif olamaz")
+    if payload.device_limit is not None and payload.device_limit < 0:
+        raise HTTPException(status_code=400, detail="Cihaz limiti negatif olamaz")
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("SELECT 1 FROM organizations WHERE id = %s", (organization_id,))
+    if not cur.fetchone():
+        cur.close(); conn.close()
+        raise HTTPException(status_code=404, detail="Organizasyon bulunamadı")
+
+    ensure_subscription(organization_id, cur, user)
+    mevcut = _subscription_row(organization_id, cur) or {}
+
+    # Uzatma, kalan sureyi YAKMAZ: hala gecerliyse mevcut bitis tarihinin
+    # uzerine ekleniyor, dolmussa bugunden baslatiliyor.
+    yeni_bitis = None
+    if payload.valid_until:
+        try:
+            yeni_bitis = datetime.fromisoformat(payload.valid_until.replace("Z", "+00:00"))
+        except ValueError:
+            cur.close(); conn.close()
+            raise HTTPException(status_code=400, detail="Geçersiz tarih")
+    elif payload.months:
+        now = datetime.now(timezone.utc)
+        temel = mevcut.get("valid_until")
+        baslangic = temel if (temel and temel > now) else now
+        yeni_bitis = baslangic + timedelta(days=30 * payload.months)
+
+    alanlar = ["status = %s", "updated_at = now()", "updated_by = %s"]
+    degerler = [payload.status, user]
+    for kolon, deger in (("device_price", payload.device_price),
+                         ("period", payload.period),
+                         ("device_limit", payload.device_limit),
+                         ("note", payload.note),
+                         ("valid_until", yeni_bitis)):
+        if deger is not None:
+            alanlar.insert(0, f"{kolon} = %s")
+            degerler.insert(0, deger)
+    degerler.append(organization_id)
+    cur.execute(f"UPDATE subscriptions SET {', '.join(alanlar)} WHERE organization_id = %s",
+                degerler)
+
+    cur.execute("""
+        SELECT count(DISTINCT d.device_id) FROM devices d
+        JOIN facilities f ON f.id = d.facility_id WHERE f.organization_id = %s
+    """, (organization_id,))
+    cihaz = cur.fetchone()[0]
+    guncel = _subscription_row(organization_id, cur)
+    cur.execute("""
+        INSERT INTO subscription_events
+            (organization_id, action, valid_until, device_count, device_price, amount, note, created_by)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+    """, (organization_id,
+          "cancelled" if payload.status == "cancelled" else ("extended" if yeni_bitis else "updated"),
+          guncel["valid_until"], cihaz, guncel["device_price"],
+          round(cihaz * guncel["device_price"], 2), payload.note, user))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Abonelik güncellendi"}
+
+
+@app.get("/admin/subscriptions/{organization_id}/events")
+def admin_subscription_events(organization_id: int, user: str = Depends(require_admin)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT action, valid_until, device_count, device_price, amount, note, created_at, created_by
+        FROM subscription_events WHERE organization_id = %s
+        ORDER BY created_at DESC LIMIT 50
+    """, (organization_id,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [{"action": r[0], "valid_until": r[1], "device_count": r[2], "device_price": float(r[3] or 0),
+             "amount": float(r[4] or 0), "note": r[5], "created_at": r[6], "created_by": r[7]}
+            for r in rows]
+
+
 @app.get("/admin/fleet")
 def admin_fleet(user: str = Depends(require_admin)):
     """Uretici gorunumu: satilan/kurulan tum cihazlar, canli durumlari ve firmware
@@ -1849,6 +2144,9 @@ def register(credentials: RegisterRequest, request: Request):
             "INSERT INTO org_members (organization_id, username, role) VALUES (%s, %s, 'org_admin')",
             (org_id, credentials.username),
         )
+        # Yeni organizasyon deneme suresiyle basliyor -- kayit olan kisi
+        # satis surecini beklemeden sistemi kullanabilsin.
+        ensure_subscription(org_id, cur, credentials.username)
     except psycopg2.IntegrityError:
         raise HTTPException(status_code=409, detail="Bu kullanıcı adı, e-posta veya telefon numarası zaten kayıtlı")
     finally:
@@ -1882,7 +2180,7 @@ def verify_email(token: str):
 
 # ---------- REST: Geçmiş veri sorgusu ----------
 @app.get("/measurements")
-def get_measurements(device_id: str, minutes: int = 60, user: str = Depends(require_auth)):
+def get_measurements(device_id: str, minutes: int = 60, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = psycopg2.connect(**DB_CONFIG)
@@ -1908,7 +2206,7 @@ def get_measurements(device_id: str, minutes: int = 60, user: str = Depends(requ
 
 # ---------- REST: Toplam enerji sayaçları ----------
 @app.get("/energy")
-def get_energy(device_id: str, user: str = Depends(require_auth)):
+def get_energy(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = psycopg2.connect(**DB_CONFIG)
@@ -1965,7 +2263,7 @@ def _hourly_delta_sql(short: str, full: str) -> str:
 
 
 @app.get("/energy/hourly")
-def get_energy_hourly(device_id: str, format: str = "json", days: int = 7, user: str = Depends(require_auth)):
+def get_energy_hourly(device_id: str, format: str = "json", days: int = 7, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     days = max(1, min(days, 90))
@@ -2065,7 +2363,7 @@ STATS_JSON_KEYS = [
 ]
 
 @app.get("/stats")
-def get_stats(device_id: str, user: str = Depends(require_auth)):
+def get_stats(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = psycopg2.connect(**DB_CONFIG)
@@ -2107,7 +2405,7 @@ PEAKS_JSON_KEYS = [
 ]
 
 @app.get("/peaks")
-def get_peaks(device_id: str, user: str = Depends(require_auth)):
+def get_peaks(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = psycopg2.connect(**DB_CONFIG)
@@ -2144,7 +2442,7 @@ DEMAND_JSON_KEYS = [
 ]
 
 @app.get("/demand")
-def get_demand(device_id: str, user: str = Depends(require_auth)):
+def get_demand(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = psycopg2.connect(**DB_CONFIG)
@@ -2166,7 +2464,7 @@ HARMONICS_COLUMNS = ["thd1", "thd2", "thd3"] + [
 ]
 
 @app.get("/harmonics")
-def get_harmonics(device_id: str, user: str = Depends(require_auth)):
+def get_harmonics(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = psycopg2.connect(**DB_CONFIG)
@@ -2189,7 +2487,7 @@ INFO_COLUMNS = [
 ]
 
 @app.get("/info")
-def get_info(device_id: str, user: str = Depends(require_auth)):
+def get_info(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = psycopg2.connect(**DB_CONFIG)
@@ -2584,7 +2882,7 @@ def set_tariff(device_id: str, payload: TariffRequest, user: str = Depends(requi
 
 @app.get("/reports/reactive")
 def reactive_report(device_id: str, period: str = "monthly", count: int = 12,
-                    format: str = "json", user: str = Depends(require_auth)):
+                    format: str = "json", user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     if period not in ("monthly", "daily"):
@@ -2835,7 +3133,7 @@ def _analyze_bill_month(bucket, tou: dict, demand: dict, reactive: dict | None,
 
 @app.get("/reports/bill")
 def bill_report(device_id: str, months: int = 12, format: str = "json",
-                user: str = Depends(require_auth)):
+                user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     months = max(1, min(months, 36))
@@ -3506,7 +3804,7 @@ def _report_footer(c, W, L, R, ink, muted, accent):
 
 @app.get("/reports/monthly-pdf")
 def monthly_pdf(device_id: str, year: int | None = None, month: int | None = None,
-                user: str = Depends(require_auth)):
+                user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     if year is None or month is None:
@@ -4005,7 +4303,7 @@ def power_quality_report(device_id: str, days: int, cur) -> dict:
 
 
 @app.get("/reports/power-quality")
-def get_power_quality(device_id: str, days: int = 7, user: str = Depends(require_auth)):
+def get_power_quality(device_id: str, days: int = 7, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     days = max(1, min(days, 90))
@@ -4046,11 +4344,36 @@ def set_nominal_voltage(device_id: str, payload: NominalVoltageRequest,
 connected_clients: list[tuple[WebSocket, str]] = []
 device_status: dict[str, dict] = {}  # device_id -> {"status": "online"|"offline", "changed_at": iso}
 
+def _websocket_subscription_ok(username: str) -> bool:
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT organization_id FROM org_members WHERE username = %s LIMIT 1", (username,))
+        row = cur.fetchone()
+        if not row:
+            return True  # organizasyonu yok -- erisim zaten bos
+        return subscription_state(row[0], cur)["active"]
+    except Exception as e:
+        # Abonelik kontrolu patlarsa musteriyi disari atmiyoruz: yanlis
+        # pozitif bir kilit, gecici bir sizintidan daha kotu.
+        logger.error("WebSocket abonelik kontrolu hatasi (%s): %s", username, e)
+        return True
+    finally:
+        cur.close()
+        conn.close()
+
+
 @app.websocket("/ws/live")
 async def websocket_endpoint(websocket: WebSocket, token: str | None = None, device_id: str | None = None):
     username = token and verify_token(token)
     if not username or not device_id or not is_device_owner(username, device_id):
         await websocket.close(code=1008)
+        return
+    # Canli veri akisi da abonelige tabi -- Depends() WebSocket'te REST'teki
+    # gibi calismadigi icin kontrol elle yapiliyor. Bu unutulursa suresi dolmus
+    # musteri panelin en degerli parcasini kullanmaya devam eder.
+    if not _websocket_subscription_ok(username):
+        await websocket.close(code=1008, reason="Abonelik sona erdi")
         return
     await websocket.accept()
     connected_clients.append((websocket, device_id))
