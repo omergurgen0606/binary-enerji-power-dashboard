@@ -432,6 +432,142 @@ function Avatar({ url, username, size = 96 }) {
   );
 }
 
+// ---------- Push bildirimi ----------
+// Tarayıcının abonelik anahtarları ham bayt; sunucuya base64url olarak
+// gönderiliyor. VAPID açık anahtarı da tersine, base64url'den Uint8Array'e.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = window.atob(base64);
+  return Uint8Array.from([...raw].map((ch) => ch.charCodeAt(0)));
+}
+
+function arrayBufferToBase64Url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  bytes.forEach((b) => { binary += String.fromCharCode(b); });
+  return window.btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+const PUSH_SUPPORTED =
+  typeof window !== 'undefined' &&
+  'serviceWorker' in navigator &&
+  'PushManager' in window &&
+  'Notification' in window;
+
+function PushToggle({ token }) {
+  const [subscribed, setSubscribed] = useState(null); // null = kontrol ediliyor
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!PUSH_SUPPORTED) { setSubscribed(false); return undefined; }
+    navigator.serviceWorker.getRegistration('/sw.js')
+      .then((reg) => (reg ? reg.pushManager.getSubscription() : null))
+      .then((sub) => { if (!cancelled) setSubscribed(!!sub); })
+      .catch(() => { if (!cancelled) setSubscribed(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function enable() {
+    setBusy(true); setError(''); setInfo('');
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') {
+        setError(permission === 'denied'
+          ? 'Bildirim izni reddedilmiş. Tarayıcı ayarlarından bu siteye izin vermeniz gerekiyor.'
+          : 'Bildirim izni verilmedi.');
+        return;
+      }
+      const reg = await navigator.serviceWorker.register('/sw.js');
+      await navigator.serviceWorker.ready;
+
+      const keyRes = await axios.get(`${API_BASE}/push/vapid-key`);
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyRes.data.public_key),
+      });
+
+      await axios.post(`${API_BASE}/push/subscribe`, {
+        endpoint: sub.endpoint,
+        p256dh: arrayBufferToBase64Url(sub.getKey('p256dh')),
+        auth: arrayBufferToBase64Url(sub.getKey('auth')),
+        user_agent: navigator.userAgent,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+
+      setSubscribed(true);
+      setInfo('Bildirimler açıldı. Alarm oluştuğunda bu tarayıcıya bildirim gelecek.');
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Bildirimler açılamadı.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    setBusy(true); setError(''); setInfo('');
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (sub) {
+        await axios.post(`${API_BASE}/push/unsubscribe`, { endpoint: sub.endpoint },
+          { headers: { Authorization: `Bearer ${token}` } });
+        await sub.unsubscribe();
+      }
+      setSubscribed(false);
+      setInfo('Bildirimler kapatıldı.');
+    } catch {
+      setError('Bildirimler kapatılamadı.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Anlık Bildirimler</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+        Alarm oluştuğunda bu tarayıcıya anında bildirim gönderilir — e-postayı beklemeden.
+        Telefonda kullanmak için siteyi ana ekrana ekleyin.
+      </div>
+
+      {!PUSH_SUPPORTED ? (
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          Bu tarayıcı anlık bildirimleri desteklemiyor.
+        </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={subscribed ? disable : enable}
+            disabled={busy || subscribed === null}
+            style={{
+              padding: '8px 16px', borderRadius: 'var(--radius-xs)',
+              border: subscribed ? '1px solid var(--border)' : 'none',
+              background: subscribed ? 'var(--surface)' : 'var(--accent)',
+              color: subscribed ? 'var(--muted)' : '#fff',
+              fontSize: 12, fontWeight: 600,
+              cursor: busy || subscribed === null ? 'default' : 'pointer',
+            }}
+          >
+            {busy ? 'İşleniyor…'
+              : subscribed === null ? 'Kontrol ediliyor…'
+                : subscribed ? 'Bildirimleri kapat' : 'Bildirimleri aç'}
+          </button>
+          <span style={{ fontSize: 12, color: subscribed ? 'var(--accent)' : 'var(--muted)' }}>
+            {subscribed === null ? '' : subscribed ? 'Bu tarayıcıda açık' : 'Kapalı'}
+          </span>
+        </div>
+      )}
+
+      {info && <div style={{ fontSize: 12, color: 'var(--accent)', marginTop: 8 }}>{info}</div>}
+      {error && <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 8 }}>{error}</div>}
+    </div>
+  );
+}
+
 function MonthlyReportToggle({ token, enabled, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -555,6 +691,10 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
               <AccountField label="Üyelik Tarihi" value={formatJoinDate(profile.created_at)} />
               <AccountField label="E-posta Doğrulandı" value={profile.is_verified ? 'Evet' : 'Hayır'} />
               <AccountField label="Bağlı Cihaz Sayısı" value={String(deviceCount ?? 0)} />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
+              <PushToggle token={token} />
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>

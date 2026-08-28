@@ -1436,8 +1436,17 @@ def _set_rule_active(rule_id: int, active: bool):
 
 
 def alarm_notify(device_id: str, subject: str, body: str):
-    """Cihaz sahibine e-posta gonderir. MQTT dongusunu bloklamamak icin ayri thread'de."""
+    """Alarmi e-posta ve push ile duyurur. MQTT dongusunu bloklamamak icin
+    ayri thread'de.
+
+    Iki kanalin ALICI KAPSAMI farkli: push, cihaza erisimi olan herkese
+    gidiyor (organizasyon hiyerarsisine gore); e-posta ise hala yalnizca
+    cihaz sahibine. E-postanin dar kapsami organizasyon yapisindan onceki
+    davranis -- bilincli olarak bu degisiklikte dokunulmadi, ayrica ele
+    alinmasi gerekiyor.
+    """
     def _send():
+        device_name = device_id
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
@@ -1449,22 +1458,30 @@ def alarm_notify(device_id: str, subject: str, body: str):
             row = cur.fetchone()
             cur.close()
             conn.close()
+            if row:
+                device_name = row[1]
             if not row or not row[0]:
                 logger.warning("Alarm bildirimi gonderilemedi, e-posta yok: %s", device_id)
-                return
-            email, device_name = row
-            resend.Emails.send({
-                "from": RESEND_FROM,
-                "to": [email],
-                "subject": f"{subject} — {device_name}",
-                "html": (
-                    f"<p><b>{device_name}</b> cihazında alarm durumu:</p>"
-                    f"<p style='font-size:15px'>{body}</p>"
-                    f"<p><a href='{SITE_URL}'>Panoyu aç</a></p>"
-                ),
-            })
+            else:
+                resend.Emails.send({
+                    "from": RESEND_FROM,
+                    "to": [row[0]],
+                    "subject": f"{subject} — {device_name}",
+                    "html": (
+                        f"<p><b>{device_name}</b> cihazında alarm durumu:</p>"
+                        f"<p style='font-size:15px'>{body}</p>"
+                        f"<p><a href='{SITE_URL}'>Panoyu aç</a></p>"
+                    ),
+                })
         except Exception as e:
             logger.error("Alarm e-postasi gonderilemedi (%s): %s", device_id, e)
+
+        # Push, e-postadan bagimsiz: e-posta gonderimi patlasa bile bildirim
+        # gitmeli (ve tersi).
+        try:
+            push_notify(device_id, f"{subject} — {device_name}", body)
+        except Exception as e:
+            logger.error("Alarm push bildirimi gonderilemedi (%s): %s", device_id, e)
 
     threading.Thread(target=_send, daemon=True).start()
 
@@ -3572,6 +3589,182 @@ def send_monthly_reports(year: int | None = None, month: int | None = None) -> d
 def trigger_monthly_reports(year: int | None = None, month: int | None = None,
                             user: str = Depends(require_admin)):
     return send_monthly_reports(year, month)
+
+# ---------- Push bildirimi ----------
+# Alarmlar bugune kadar yalnizca e-posta ile gidiyordu; gerilim alarmi gibi
+# zamana duyarli bir olayda e-posta cok yavas kalabiliyor. Bu katman abonelik
+# kaydini ve gonderimi tasima-bagimsiz tutuyor: su an sadece Web Push var ama
+# native FCM/APNs eklendiginde push_subscriptions tablosuna yeni bir transport
+# satiri olarak katilacak, dagitim mantigi degismeyecek.
+
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "")
+VAPID_SUBJECT = os.environ.get("VAPID_SUBJECT", "mailto:no-reply@binaryenerji.com")
+PUSH_ENABLED = bool(VAPID_PRIVATE_KEY and VAPID_PUBLIC_KEY)
+
+# Ust uste bu kadar basarisiz gonderimden sonra abonelik silinir. Tarayici
+# aboneligi iptal ettiginde push servisi 404/410 doner; onlari zaten aninda
+# siliyoruz, bu sayac gecici olmayan diger hatalar icin.
+PUSH_MAX_FAILURES = 5
+
+
+class PushSubscriptionRequest(BaseModel):
+    endpoint: str
+    p256dh: str
+    auth: str
+    user_agent: str | None = None
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
+@app.get("/push/vapid-key")
+def push_vapid_key():
+    """Tarayicinin abone olurken kullanacagi acik anahtar. Kimlik dogrulama
+    gerekmiyor -- acik anahtar zaten herkese acik olmak uzere tasarlanmis."""
+    if not PUSH_ENABLED:
+        raise HTTPException(status_code=503, detail="Push bildirimi yapılandırılmamış")
+    return {"public_key": VAPID_PUBLIC_KEY}
+
+
+@app.post("/push/subscribe")
+def push_subscribe(payload: PushSubscriptionRequest, user: str = Depends(require_auth)):
+    if not PUSH_ENABLED:
+        raise HTTPException(status_code=503, detail="Push bildirimi yapılandırılmamış")
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    # Ayni endpoint baska bir hesaba aitse ona devrediyoruz: kullanici ayni
+    # tarayicida hesap degistirdiginde eski hesaba bildirim gitmemeli.
+    cur.execute("""
+        INSERT INTO push_subscriptions (username, transport, endpoint, p256dh, auth, user_agent)
+        VALUES (%s, 'webpush', %s, %s, %s, %s)
+        ON CONFLICT (endpoint) DO UPDATE SET
+            username = EXCLUDED.username,
+            p256dh = EXCLUDED.p256dh,
+            auth = EXCLUDED.auth,
+            user_agent = EXCLUDED.user_agent,
+            failure_count = 0
+    """, (user, payload.endpoint, payload.p256dh, payload.auth,
+          (payload.user_agent or "")[:200]))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Bildirimler açıldı"}
+
+
+@app.post("/push/unsubscribe")
+def push_unsubscribe(payload: PushUnsubscribeRequest, user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("DELETE FROM push_subscriptions WHERE endpoint = %s AND username = %s",
+                (payload.endpoint, user))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Bildirimler kapatıldı"}
+
+
+@app.get("/push/subscriptions")
+def push_list_subscriptions(user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT id, transport, user_agent, created_at, last_success
+        FROM push_subscriptions WHERE username = %s ORDER BY created_at DESC
+    """, (user,))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [{"id": r[0], "transport": r[1], "user_agent": r[2],
+             "created_at": r[3], "last_success": r[4]} for r in rows]
+
+
+def _push_recipients(device_id: str, cur) -> list[tuple]:
+    """Cihaza erisebilen kullanicilarin push abonelikleri.
+
+    Kapsam _ACCESSIBLE_DEVICES_SQL uzerinden cozuluyor -- bildirimi kimin
+    alacagi ile panelde cihazi kimin gordugu ayrisamasin diye. (Alarm
+    E-POSTASI hala yalnizca cihaz sahibine gidiyor; bu, organizasyon
+    hiyerarsisinden onceki davranis ve ayrica ele alinmali.)
+    """
+    cur.execute("SELECT DISTINCT username FROM push_subscriptions WHERE transport = 'webpush'")
+    adaylar = [r[0] for r in cur.fetchall()]
+    # Erisim kontrolu kullanici basina ayri calisiyor: _ACCESSIBLE_DEVICES_SQL
+    # icindeki kullanici parametresi tek bir degeri bagliyor, korelasyonlu alt
+    # sorguya donusturulemiyor. Sorguyu burada kopyalayip degistirmek yerine
+    # kullanici basina cagirmak, kapsam mantiginin tek yerde kalmasini saglıyor.
+    izinli = []
+    for username in adaylar:
+        cur.execute(
+            "SELECT 1 FROM (" + _ACCESSIBLE_DEVICES_SQL + ") AS accessible WHERE device_id = %s",
+            (username, device_id),
+        )
+        if cur.fetchone():
+            izinli.append(username)
+    if not izinli:
+        return []
+    cur.execute("""
+        SELECT id, endpoint, p256dh, auth FROM push_subscriptions
+        WHERE transport = 'webpush' AND username = ANY(%s)
+    """, (izinli,))
+    return cur.fetchall()
+
+
+def _push_send_one(sub_id: int, endpoint: str, p256dh: str, auth: str,
+                   payload: dict, cur) -> bool:
+    from pywebpush import webpush, WebPushException
+    try:
+        webpush(
+            subscription_info={"endpoint": endpoint,
+                               "keys": {"p256dh": p256dh, "auth": auth}},
+            data=json.dumps(payload),
+            vapid_private_key=VAPID_PRIVATE_KEY,
+            vapid_claims={"sub": VAPID_SUBJECT},
+            timeout=10,
+        )
+        cur.execute("UPDATE push_subscriptions SET last_success = now(), failure_count = 0 "
+                    "WHERE id = %s", (sub_id,))
+        return True
+    except WebPushException as e:
+        status = getattr(e.response, "status_code", None)
+        # 404/410: tarayici aboneligi iptal etmis, kalici olarak gecersiz.
+        if status in (404, 410):
+            cur.execute("DELETE FROM push_subscriptions WHERE id = %s", (sub_id,))
+            logger.info("Gecersiz push aboneligi silindi (%s)", status)
+        else:
+            cur.execute("UPDATE push_subscriptions SET failure_count = failure_count + 1 "
+                        "WHERE id = %s", (sub_id,))
+            cur.execute("DELETE FROM push_subscriptions WHERE id = %s AND failure_count >= %s",
+                        (sub_id, PUSH_MAX_FAILURES))
+            logger.warning("Push gonderilemedi (%s): %s", status, e)
+        return False
+    except Exception as e:
+        logger.error("Push gonderim hatasi: %s", e)
+        return False
+
+
+def push_notify(device_id: str, title: str, body: str, tag: str | None = None) -> int:
+    """Cihaza erisimi olan herkese push gonderir. Kac gonderim basarili
+    oldugunu doner. Alarm akisini bloklamamasi icin cagiran taraf ayri bir
+    thread'de calistirmali."""
+    if not PUSH_ENABLED:
+        return 0
+    sent = 0
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+        cur = conn.cursor()
+        payload = {"title": title, "body": body, "url": SITE_URL,
+                   "tag": tag or f"alarm-{device_id}"}
+        for sub_id, endpoint, p256dh, auth in _push_recipients(device_id, cur):
+            if _push_send_one(sub_id, endpoint, p256dh, auth, payload, cur):
+                sent += 1
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error("Push bildirimi gonderilemedi (%s): %s", device_id, e)
+    return sent
 
 # ---------- WebSocket: Canlı veri ----------
 connected_clients: list[tuple[WebSocket, str]] = []
