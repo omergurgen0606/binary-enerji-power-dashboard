@@ -1,5 +1,12 @@
 FROM python:3.11-slim
 
+# DejaVu: PDF raporlarindaki Turkce karakterler icin. reportlab'in yerlesik
+# Helvetica'si Latin-1 oldugu icin g/s/i harflerini basamiyor, bu yuzden
+# gomulebilir bir TTF sart.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
 COPY requirements.txt .

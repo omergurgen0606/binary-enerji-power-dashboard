@@ -10,3 +10,4 @@ resend
 openpyxl
 python-multipart
 Pillow
+reportlab

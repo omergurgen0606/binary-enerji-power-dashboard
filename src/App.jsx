@@ -432,6 +432,49 @@ function Avatar({ url, username, size = 96 }) {
   );
 }
 
+function MonthlyReportToggle({ token, enabled, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function toggle() {
+    setBusy(true); setError('');
+    try {
+      await axios.post(`${API_BASE}/me/monthly-report`, { enabled: !enabled },
+        { headers: { Authorization: `Bearer ${token}` } });
+      onChanged();
+    } catch {
+      setError('Tercih kaydedilemedi.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Aylık Enerji Raporu</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+        Her ayın başında, bir önceki dönemin fatura dökümünü, tasarruf fırsatlarını ve alarm
+        özetini içeren PDF raporu e-posta ile gönderilir.
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+        <button type="button" onClick={toggle} disabled={busy} style={{
+          padding: '8px 16px', borderRadius: 'var(--radius-xs)',
+          border: enabled ? '1px solid var(--border)' : 'none',
+          background: enabled ? 'var(--surface)' : 'var(--accent)',
+          color: enabled ? 'var(--muted)' : '#fff',
+          fontSize: 12, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
+        }}>
+          {busy ? 'Kaydediliyor…' : enabled ? 'Raporu kapat' : 'Raporu aç'}
+        </button>
+        <span style={{ fontSize: 12, color: enabled ? 'var(--accent)' : 'var(--muted)' }}>
+          {enabled ? 'Açık — her ayın 1\'inde gönderilecek' : 'Kapalı'}
+        </span>
+        {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChange }) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState('');
@@ -512,6 +555,10 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
               <AccountField label="Üyelik Tarihi" value={formatJoinDate(profile.created_at)} />
               <AccountField label="E-posta Doğrulandı" value={profile.is_verified ? 'Evet' : 'Hayır'} />
               <AccountField label="Bağlı Cihaz Sayısı" value={String(deviceCount ?? 0)} />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
+              <MonthlyReportToggle token={token} enabled={profile.monthly_report} onChanged={fetchProfile} />
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
@@ -2309,6 +2356,8 @@ function BillSection({ token, device }) {
   const [error, setError] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [pdfMonth, setPdfMonth] = useState('');
+  const [pdfBusy, setPdfBusy] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -2349,6 +2398,31 @@ function BillSection({ token, device }) {
       setError('Excel indirilemedi.');
     } finally {
       setDownloading(false);
+    }
+  }
+
+  // Aylik PDF raporu: e-posta ile gonderilenin aynisi, istenen ay icin.
+  async function downloadPdf(bucket) {
+    const d = new Date(bucket);
+    const year = d.getFullYear();
+    const month = d.getMonth() + 1;
+    setPdfBusy(true);
+    setPdfMonth(bucket);
+    try {
+      const res = await axios.get(
+        `${API_BASE}/reports/monthly-pdf?device_id=${device.device_id}&year=${year}&month=${month}`,
+        { headers: { Authorization: `Bearer ${token}` }, responseType: 'blob' });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${device.device_id}-${year}-${String(month).padStart(2, '0')}-enerji-raporu.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('PDF raporu indirilemedi.');
+    } finally {
+      setPdfBusy(false);
+      setPdfMonth('');
     }
   }
 
@@ -2479,7 +2553,7 @@ function BillSection({ token, device }) {
           </div>
 
           <div style={{ overflowX: 'auto', marginTop: 16 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 760 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 820 }}>
               <thead>
                 <tr style={{ color: 'var(--muted)', textAlign: 'right' }}>
                   <th style={{ textAlign: 'left', padding: '6px 8px' }}>Ay</th>
@@ -2492,6 +2566,7 @@ function BillSection({ token, device }) {
                   {priced && <th style={{ padding: '6px 8px' }}>Güç Aşım</th>}
                   {priced && <th style={{ padding: '6px 8px' }}>Reaktif</th>}
                   {priced && <th style={{ padding: '6px 8px' }}>Toplam</th>}
+                  <th style={{ padding: '6px 8px' }}>Rapor</th>
                 </tr>
               </thead>
               <tbody>
@@ -2524,6 +2599,18 @@ function BillSection({ token, device }) {
                     {priced && <td className="mono" style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600 }}>
                       {money(r.total_cost)}
                     </td>}
+                    <td style={{ padding: '7px 8px', textAlign: 'right' }}>
+                      <button type="button" onClick={() => downloadPdf(r.bucket)}
+                              disabled={pdfBusy}
+                              style={{
+                                padding: '4px 10px', borderRadius: 'var(--radius-xs)',
+                                border: '1px solid var(--border)', background: 'var(--surface)',
+                                color: 'var(--muted)', fontSize: 11, fontWeight: 600,
+                                cursor: pdfBusy ? 'default' : 'pointer', whiteSpace: 'nowrap',
+                              }}>
+                        {pdfBusy && pdfMonth === r.bucket ? '…' : 'PDF'}
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
