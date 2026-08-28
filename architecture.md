@@ -481,6 +481,20 @@ Bölüm 5.7'nin devamı — yukarıdaki "flaşlanıp test edilmedi" notu artık 
   - Alarmlar sekmesinde **çözülmemiş** alarm sayısı rozet olarak duruyor (`resolved_at IS NULL`), böylece sekme kapalıyken de görülüyor. 30 saniyede bir yenileniyor; rozet kritik olmadığı için hata sessizce yutuluyor.
   - Seçili sekme `localStorage`'da (`dash-tab`) saklanıyor — iOS'ta `@AppStorage`, Android'de `rememberSaveable`.
   - 560px altında sekmeler eşit genişlikte dağılıyor (yatay kaydırma gerekmiyor); stiller `src/index.css` içinde `.dash-tabs` / `.dash-tab` altında.
+- **URL / geri tuşu (28 Ağustos 2026):** Gezinme durumu yalnızca React state'indeydi ve URL'ye hiç yansımıyordu; bu yüzden tarayıcının geri tuşu bir seviye yukarı çıkmak yerine **siteden tamamen çıkıyordu**. Artık URL tek doğruluk kaynağı:
+
+  | Yol | Ekran |
+  |---|---|
+  | `/` | Cihaz listesi |
+  | `/cihaz/<device_id>/<sekme>` | Panel (sekme: canli/fatura/analiz/alarm/cihaz) |
+  | `/hesabim` · `/filo` · `/organizasyon` | İlgili sayfalar |
+  | `/gizlilik-politikasi` · `/kullanim-sartlari` · `/davet` | Statik sayfalar |
+
+  - Sekme değişimleri `replaceState` kullanıyor, `pushState` değil. Yoksa panelden çıkmak için geriye altı kez basmak gerekirdi; geri artık her zaman paneli terk ediyor.
+  - Geçersiz cihaz bağlantısı (silinmiş cihaz, yanlış URL) boş sayfa bırakmıyor, listeye yönlendiriyor.
+  - Yan fayda: sayfa yenilenince bulunduğunuz yer korunuyor ve bir cihazın bağlantısı paylaşılabiliyor.
+  - `App()` içindeki statik sayfa kontrolleri hook'lardan önce `return` ediyordu — istemci tarafı yönlendirmeyle bu hook kuralı ihlali gerçek bir hataya dönüşürdü; hook'lar öne alındı.
+  - nginx tarafında ek yapılandırma gerekmedi: `try_files $uri $uri/ /index.html` yeni yolları zaten karşılıyor.
 - **Tasarım:** Entes Enerji Doktoru esintili, özgün palet:
   - Arka plan: `#F4F6F9`, kart: `#FFFFFF`, ana metin: `#0B1F3A`
   - Faz renkleri: L1 bakır `#C97A2B`, L2 teal `#1B7A72`, L3 indigo `#4A5FC1`

@@ -4513,7 +4513,7 @@ function DashboardTabs({ active, onChange, alarmCount }) {
   );
 }
 
-function DeviceDashboard({ token, device, onBack, onLogout, theme, subscription }) {
+function DeviceDashboard({ token, device, tab, onTabChange, onBack, onLogout, theme, subscription }) {
   const [connected, setConnected] = useState(false);
   const [lastMessageAt, setLastMessageAt] = useState(null);
   const [esp32Status, setEsp32Status] = useState(null); // 'online' | 'offline' | null (henüz bilinmiyor)
@@ -4531,15 +4531,12 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme, subscription 
   const [harmonics, setHarmonics] = useState(null);
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [firmware, setFirmware] = useState(null);
-  const [tab, setTab] = useState(() => {
-    try { return localStorage.getItem('dash-tab') || 'canli'; } catch { return 'canli'; }
-  });
   const [alarmCount, setAlarmCount] = useState(0);
   const wsRef = useRef(null);
 
   function selectTab(next) {
-    setTab(next);
-    try { localStorage.setItem('dash-tab', next); } catch { /* gizli sekme; yoksay */ }
+    // Sekme artık URL'de tutuluyor; kaynak App'teki route.
+    onTabChange(next);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -4957,23 +4954,57 @@ function TermsOfService() {
   );
 }
 
-export default function App() {
-  if (typeof window !== 'undefined' && window.location.pathname === '/gizlilik-politikasi') {
-    return <PrivacyPolicy />;
+// ---------- Gezinme / URL ----------
+//
+// Gezinme durumu daha önce yalnızca React state'indeydi ve URL'ye hiç
+// yansımıyordu; bu yüzden tarayıcının geri tuşu bir seviye yukarı çıkmak
+// yerine siteden tamamen çıkıyordu. Artık URL tek doğruluk kaynağı: geri/ileri
+// kendiliğinden çalışıyor, sayfa yenilenince bulunduğunuz yer korunuyor ve
+// bir cihazın bağlantısı paylaşılabiliyor.
+function parseRoute(pathname) {
+  if (pathname === '/gizlilik-politikasi') return { ad: 'gizlilik' };
+  if (pathname === '/kullanim-sartlari') return { ad: 'sartlar' };
+  if (pathname.startsWith('/davet')) return { ad: 'davet' };
+  if (pathname === '/hesabim') return { ad: 'hesabim' };
+  if (pathname === '/filo') return { ad: 'filo' };
+  if (pathname === '/organizasyon') return { ad: 'organizasyon' };
+  const eslesme = pathname.match(/^\/cihaz\/([^/]+)(?:\/([^/]+))?\/?$/);
+  if (eslesme) {
+    return {
+      ad: 'cihaz',
+      deviceId: decodeURIComponent(eslesme[1]),
+      sekme: eslesme[2] && DASHBOARD_TABS.some((t) => t.key === eslesme[2]) ? eslesme[2] : 'canli',
+    };
   }
-  if (typeof window !== 'undefined' && window.location.pathname === '/kullanim-sartlari') {
-    return <TermsOfService />;
-  }
-  if (typeof window !== 'undefined' && window.location.pathname === '/davet') {
-    return <InvitePage token={localStorage.getItem('token')} />;
+  return { ad: 'liste' };
+}
+
+function useRoute() {
+  const [route, setRoute] = useState(() => parseRoute(window.location.pathname));
+
+  useEffect(() => {
+    // Geri/ileri tuşları buradan yakalanıyor.
+    const onPop = () => setRoute(parseRoute(window.location.pathname));
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  // replace=true geçmişe yeni kayıt eklemez. Sekme değişimlerinde bu
+  // kullanılıyor: yoksa panelden çıkmak için geriye altı kez basmak gerekirdi.
+  function navigate(path, { replace = false } = {}) {
+    if (replace) window.history.replaceState(null, '', path);
+    else window.history.pushState(null, '', path);
+    setRoute(parseRoute(path));
   }
 
+  return [route, navigate];
+}
+
+
+export default function App() {
+  const [route, navigate] = useRoute();
   const [token, setToken] = useState(() => localStorage.getItem('token'));
   const [devices, setDevices] = useState(null); // null = yükleniyor
-  const [selectedDevice, setSelectedDevice] = useState(null);
-  const [showAccount, setShowAccount] = useState(false);
-  const [showFleet, setShowFleet] = useState(false);
-  const [showOrganization, setShowOrganization] = useState(false);
   const [subscription, setSubscription] = useState(null);
   const [role, setRole] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || 'klasik');
@@ -4997,10 +5028,8 @@ export default function App() {
     localStorage.removeItem('token');
     setToken(null);
     setDevices(null);
-    setSelectedDevice(null);
-    setShowFleet(false);
-    setShowOrganization(false);
     setRole(null);
+    navigate('/');
   }
 
   function refreshDevices() {
@@ -5026,6 +5055,22 @@ export default function App() {
       .catch(() => {});
   }, [token]);
 
+  const selectedDevice = route.ad === 'cihaz' && devices
+    ? devices.find((d) => d.device_id === route.deviceId)
+    : null;
+
+  // Geçersiz cihaz bağlantısı (silinmiş cihaz, yanlış yazılmış URL) sayfayı boş
+  // bırakmasın -- listeye dönülüyor.
+  useEffect(() => {
+    if (route.ad === 'cihaz' && devices && !selectedDevice) {
+      navigate('/', { replace: true });
+    }
+  }, [route.ad, route.deviceId, devices, selectedDevice]);
+
+  if (route.ad === 'gizlilik') return <PrivacyPolicy />;
+  if (route.ad === 'sartlar') return <TermsOfService />;
+  if (route.ad === 'davet') return <InvitePage token={localStorage.getItem('token')} />;
+
   if (!token) {
     return (
       <>
@@ -5039,20 +5084,20 @@ export default function App() {
     return null;
   }
 
-  if (showFleet) {
-    return <FleetPage token={token} onBack={() => setShowFleet(false)} />;
+  if (route.ad === 'filo') {
+    return <FleetPage token={token} onBack={() => navigate('/')} />;
   }
 
-  if (showOrganization) {
-    return <OrganizationPage token={token} onBack={() => setShowOrganization(false)} />;
+  if (route.ad === 'organizasyon') {
+    return <OrganizationPage token={token} onBack={() => navigate('/')} />;
   }
 
-  if (showAccount) {
+  if (route.ad === 'hesabim') {
     return (
       <>
         <AccountPage
           token={token}
-          onBack={() => setShowAccount(false)}
+          onBack={() => navigate('/')}
           onLogout={handleLogout}
           deviceCount={devices?.length}
           theme={theme}
@@ -5070,7 +5115,13 @@ export default function App() {
         <DeviceDashboard
           token={token}
           device={selectedDevice}
-          onBack={() => setSelectedDevice(null)}
+          tab={route.sekme}
+          onTabChange={(t) => {
+            try { localStorage.setItem('dash-tab', t); } catch { /* gizli sekme; yoksay */ }
+            // replace: sekme geçişleri geçmişe yığılmasın, geri panelden çıksın.
+            navigate(`/cihaz/${encodeURIComponent(selectedDevice.device_id)}/${t}`, { replace: true });
+          }}
+          onBack={() => navigate('/')}
           onLogout={handleLogout}
           theme={theme}
           subscription={subscription}
@@ -5084,11 +5135,15 @@ export default function App() {
     <>
       <DeviceList
         devices={devices}
-        onSelect={setSelectedDevice}
+        onSelect={(device) => {
+          let sonSekme = 'canli';
+          try { sonSekme = localStorage.getItem('dash-tab') || 'canli'; } catch { /* yoksay */ }
+          navigate(`/cihaz/${encodeURIComponent(device.device_id)}/${sonSekme}`);
+        }}
         onLogout={handleLogout}
-        onOpenAccount={() => setShowAccount(true)}
-        onOpenFleet={() => setShowFleet(true)}
-        onOpenOrganization={() => setShowOrganization(true)}
+        onOpenAccount={() => navigate('/hesabim')}
+        onOpenFleet={() => navigate('/filo')}
+        onOpenOrganization={() => navigate('/organizasyon')}
         isAdmin={role === 'admin'}
         token={token}
         onDeviceAdded={refreshDevices}
