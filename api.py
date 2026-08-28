@@ -42,6 +42,85 @@ MQTT_USER = os.environ["MQTT_USER"]
 MQTT_PASSWORD = os.environ["MQTT_PASSWORD"]
 DEVICE_CLAIM_SECRET = os.environ["DEVICE_CLAIM_SECRET"]
 
+# ---------- Veritabanı bağlantı havuzu ----------
+# Onceden her istek yeni bir baglanti aciyordu. Olculen sonuc: baglanti kurmak
+# 22,7 ms suruyor, korumali her istek 2 baglanti aciyor ve panel bir acilista
+# ~12-15 istek atiyor -- yani 25'lik max_connections siniri TEK kullaniciyla
+# bile zorlaniyordu (30 es zamanli denemenin 6'si "too many clients" ile
+# dusuyordu). Havuz hem bu tavani kaldiriyor hem de istek basina ~45 ms'lik
+# baglanti kurma maliyetini siliyor.
+#
+# maxconn bilincli olarak DUSUK: her PostgreSQL backend'i ~8 MB tutuyor ve
+# sunucuda 961 MB var. Amac daha fazla backend degil, DAHA AZ backend'i
+# paylastirmak. Kalan kontenjan MQTT thread'inin uzun omurlu baglantisina,
+# arka plan islerine ve yonetim erisimine birakiliyor.
+DB_POOL_MAX = int(os.environ.get("DB_POOL_MAX", "12"))
+# Havuz doluysa hemen hata vermek yerine kisa sure bekliyoruz: ani bir istek
+# kumesinde birkac milisaniye beklemek, istegi dusurmekten iyidir.
+DB_POOL_WAIT_SECONDS = 5.0
+
+_db_pool = None
+_db_pool_lock = threading.Lock()
+
+
+def _get_db_pool():
+    global _db_pool
+    if _db_pool is None:
+        with _db_pool_lock:
+            if _db_pool is None:
+                from psycopg2 import pool as _pgpool
+                _db_pool = _pgpool.ThreadedConnectionPool(1, DB_POOL_MAX, **DB_CONFIG)
+    return _db_pool
+
+
+class _PooledConnection:
+    """psycopg2 baglantisi gibi davranan ince sarmalayici.
+
+    close() baglantiyi kapatmak yerine havuza geri veriyor; boylece mevcut
+    "conn = db_connect() ... cur.close(); conn.close()" desenindeki onlarca
+    cagri yeri degistirilmeden calisiyor.
+    """
+
+    def __init__(self, conn, pool):
+        self._conn = conn
+        self._pool = pool
+        self._returned = False
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def close(self):
+        if self._returned:
+            return
+        self._returned = True
+        try:
+            # Yarim kalan / hatayla kesilmis islem bir sonraki kullaniciya
+            # kirli baglanti olarak gecmesin.
+            self._conn.rollback()
+        except Exception:
+            pass
+        try:
+            self._pool.putconn(self._conn)
+        except Exception as e:
+            logger.error("Baglanti havuza geri verilemedi: %s", e)
+
+
+def db_connect():
+    """Havuzdan bir baglanti alir. Havuz doluysa kisa sure bekler."""
+    havuz = _get_db_pool()
+    bitis = time.time() + DB_POOL_WAIT_SECONDS
+    while True:
+        try:
+            return _PooledConnection(havuz.getconn(), havuz)
+        except Exception:
+            if time.time() >= bitis:
+                logger.error("Baglanti havuzu doldu (maxconn=%s)", DB_POOL_MAX)
+                raise HTTPException(
+                    status_code=503,
+                    detail="Sunucu şu anda yoğun, lütfen birkaç saniye sonra tekrar deneyin.")
+            time.sleep(0.02)
+
+
 def compute_claim_code(device_id: str) -> str:
     # Cihazi kutulama/etiketleme sirasinda generate_claim_code.py ile ayni
     # kod uretilir ve fiziksel etikete device_id'nin yanina yazilir. Boylece
@@ -195,7 +274,7 @@ def require_auth(authorization: str | None = Header(None)) -> str:
 
 
 def get_user_role(username: str) -> str:
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT role FROM users WHERE username = %s", (username,))
     row = cur.fetchone()
@@ -246,7 +325,7 @@ _ACCESSIBLE_DEVICES_SQL = """
 
 
 def get_owned_devices(username: str) -> list[dict]:
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(_ACCESSIBLE_DEVICES_SQL + " ORDER BY f.name, dep.name NULLS FIRST, d.id", (username,))
     rows = cur.fetchall()
@@ -265,7 +344,7 @@ def get_owned_devices(username: str) -> list[dict]:
 def is_device_owner(username: str, device_id: str) -> bool:
     """Isim geriye donuk uyumluluk icin korundu; artik 'sahiplik' degil
     'kapsam icinde erisim' anlamina geliyor."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(
         "SELECT 1 FROM (" + _ACCESSIBLE_DEVICES_SQL + ") AS accessible WHERE device_id = %s",
@@ -301,7 +380,7 @@ def users_with_device_access(device_id: str, cur) -> list[str]:
 
 def get_membership(username: str) -> dict | None:
     """Kullanicinin organizasyon uyeligi + kapsami."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT m.id, m.organization_id, m.role, o.name
@@ -368,7 +447,7 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
 
     # Abonelik cihaz limiti. Cihaz basina ucretlendirildigi icin, satilandan
     # fazla cihaz eklenmesini burada engelliyoruz. Limit NULL ise sinirsiz.
-    _sub_conn = psycopg2.connect(**DB_CONFIG)
+    _sub_conn = db_connect()
     _sub_cur = _sub_conn.cursor()
     try:
         _state = subscription_state(membership["organization_id"], _sub_cur)
@@ -392,7 +471,7 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
     if department_id is not None and not department_belongs_to(department_id, facility_id):
         raise HTTPException(status_code=400, detail="Seçilen bölüm bu tesise ait değil")
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     try:
@@ -413,7 +492,7 @@ def resolve_target_facility(membership: dict, requested_facility_id: int | None)
     """Cihazin hangi tesise ekleneceğini belirler ve kullanicinin o tesise
     yetkisi olduğunu doğrular. Tek tesisli (küçük müşteri) durumda seçim
     gerekmeden otomatik çözülür."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     if membership["role"] == "org_admin":
         cur.execute(
@@ -438,7 +517,7 @@ def resolve_target_facility(membership: dict, requested_facility_id: int | None)
 
 
 def department_belongs_to(department_id: int, facility_id: int) -> bool:
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT 1 FROM departments WHERE id = %s AND facility_id = %s", (department_id, facility_id))
     row = cur.fetchone()
@@ -450,7 +529,7 @@ def department_belongs_to(department_id: int, facility_id: int) -> bool:
 def remove_device(device_id: str, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     # Ölçüm geçmişi bilerek silinmiyor — sadece kayıt kaldırılıyor. Cihaz veri
@@ -471,7 +550,7 @@ def rename_device(device_id: str, payload: RenameDeviceRequest, user: str = Depe
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=400, detail="Cihaz adı boş olamaz")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("UPDATE devices SET name = %s WHERE device_id = %s", (name, device_id))
@@ -486,7 +565,7 @@ def avatar_url_for(username: str, avatar_updated_at) -> str | None:
 
 @app.get("/me")
 def get_me(user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(
         "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at, "
@@ -519,7 +598,7 @@ def change_password(payload: ChangePasswordRequest, user: str = Depends(require_
     check_rate_limit(f"pwchange:{user}", max_attempts=5, window_seconds=60 * 60)
     if len(payload.new_password) < 6:
         raise HTTPException(status_code=400, detail="Yeni şifre en az 6 karakter olmalı")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
@@ -554,7 +633,7 @@ def change_email(payload: ChangeEmailRequest, user: str = Depends(require_auth))
     if not EMAIL_RE.match(email) or len(email) > 254:
         raise HTTPException(status_code=400, detail="Geçerli bir e-posta adresi girin")
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
@@ -600,7 +679,7 @@ def change_email(payload: ChangeEmailRequest, user: str = Depends(require_auth))
 
 @app.get("/verify-email-change", response_class=HTMLResponse)
 def verify_email_change(token: str):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("""
@@ -647,7 +726,7 @@ async def upload_avatar(file: UploadFile = File(...), user: str = Depends(requir
     img.save(os.path.join(AVATAR_DIR, f"{user}.jpg"), "JPEG", quality=85)
 
     now = datetime.utcnow()
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("UPDATE users SET avatar_updated_at = %s WHERE username = %s", (now, user))
@@ -686,7 +765,7 @@ async def upload_firmware(
     with open(os.path.join(FIRMWARE_DIR, filename), "wb") as f:
         f.write(contents)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(
@@ -720,7 +799,7 @@ def get_organization(user: str = Depends(require_auth)):
         raise HTTPException(status_code=404, detail="Bir organizasyona bağlı değilsiniz")
     org_id = membership["organization_id"]
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT id, name FROM facilities WHERE organization_id = %s ORDER BY name", (org_id,))
     facilities = [{"id": r[0], "name": r[1], "departments": []} for r in cur.fetchall()]
@@ -780,7 +859,7 @@ def create_facility(payload: FacilityRequest, user: str = Depends(require_org_ad
     if not name:
         raise HTTPException(status_code=400, detail="Tesis adı boş olamaz")
     membership = get_membership(user)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(
@@ -796,7 +875,7 @@ def create_facility(payload: FacilityRequest, user: str = Depends(require_org_ad
 @app.delete("/organization/facilities/{facility_id}")
 def delete_facility(facility_id: int, user: str = Depends(require_org_admin)):
     membership = get_membership(user)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(
@@ -825,7 +904,7 @@ def create_department(payload: DepartmentRequest, user: str = Depends(require_or
     if not name:
         raise HTTPException(status_code=400, detail="Bölüm adı boş olamaz")
     membership = get_membership(user)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(
@@ -849,7 +928,7 @@ def create_department(payload: DepartmentRequest, user: str = Depends(require_or
 @app.delete("/organization/departments/{department_id}")
 def delete_department(department_id: int, user: str = Depends(require_org_admin)):
     membership = get_membership(user)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("""
@@ -879,7 +958,7 @@ def move_device(device_id: str, payload: MoveDeviceRequest, user: str = Depends(
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     membership = get_membership(user)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(
@@ -925,7 +1004,7 @@ def create_invite(payload: InviteRequest, user: str = Depends(require_org_admin)
     membership = get_membership(user)
     org_id = membership["organization_id"]
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
 
@@ -997,7 +1076,7 @@ def create_invite(payload: InviteRequest, user: str = Depends(require_org_admin)
 @app.get("/organization/invites")
 def list_invites(user: str = Depends(require_org_admin)):
     membership = get_membership(user)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT id, email, role, created_at, expires_at
@@ -1023,7 +1102,7 @@ def list_invites(user: str = Depends(require_org_admin)):
 @app.delete("/organization/invites/{invite_id}")
 def cancel_invite(invite_id: int, user: str = Depends(require_org_admin)):
     membership = get_membership(user)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(
@@ -1042,7 +1121,7 @@ def cancel_invite(invite_id: int, user: str = Depends(require_org_admin)):
 def preview_invite(token: str):
     """Davet baglantisinin acilis sayfasi icin -- giris yapilmadan once
     'hangi organizasyon, hangi rol' gosterilebilsin diye."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT i.email, i.role, i.expires_at, i.accepted_at, o.name
@@ -1070,7 +1149,7 @@ class AcceptInviteRequest(BaseModel):
 
 @app.post("/organization/invites/accept")
 def accept_invite(payload: AcceptInviteRequest, user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("""
@@ -1162,7 +1241,7 @@ def update_member(member_id: int, payload: MemberRoleRequest, user: str = Depend
     membership = get_membership(user)
     org_id = membership["organization_id"]
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("SELECT username FROM org_members WHERE id = %s AND organization_id = %s", (member_id, org_id))
@@ -1212,7 +1291,7 @@ def update_member(member_id: int, payload: MemberRoleRequest, user: str = Depend
 def remove_member(member_id: int, user: str = Depends(require_org_admin)):
     membership = get_membership(user)
     org_id = membership["organization_id"]
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute("SELECT username, role FROM org_members WHERE id = %s AND organization_id = %s", (member_id, org_id))
@@ -1333,7 +1412,7 @@ def require_subscription(user: str = Depends(require_auth)) -> str:
     ve kimlik dogrulama. Kilitli musteri de neden kilitli oldugunu gorebilmeli
     ve cihaz listesi bos bir ekranla karsilasmamali.
     """
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     try:
         cur.execute("SELECT organization_id FROM org_members WHERE username = %s LIMIT 1", (user,))
@@ -1355,7 +1434,7 @@ def require_subscription(user: str = Depends(require_auth)) -> str:
 
 @app.get("/subscription")
 def get_subscription(user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     try:
         cur.execute("SELECT organization_id FROM org_members WHERE username = %s LIMIT 1", (user,))
@@ -1389,7 +1468,7 @@ class SubscriptionUpdate(BaseModel):
 
 @app.get("/admin/subscriptions")
 def admin_list_subscriptions(user: str = Depends(require_admin)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT o.id, o.name,
@@ -1431,7 +1510,7 @@ def admin_update_subscription(organization_id: int, payload: SubscriptionUpdate,
     if payload.device_limit is not None and payload.device_limit < 0:
         raise HTTPException(status_code=400, detail="Cihaz limiti negatif olamaz")
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT 1 FROM organizations WHERE id = %s", (organization_id,))
     if not cur.fetchone():
@@ -1492,7 +1571,7 @@ def admin_update_subscription(organization_id: int, payload: SubscriptionUpdate,
 
 @app.get("/admin/subscriptions/{organization_id}/events")
 def admin_subscription_events(organization_id: int, user: str = Depends(require_admin)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT action, valid_until, device_count, device_price, amount, note, created_at, created_by
@@ -1511,7 +1590,7 @@ def admin_subscription_events(organization_id: int, user: str = Depends(require_
 def admin_fleet(user: str = Depends(require_admin)):
     """Uretici gorunumu: satilan/kurulan tum cihazlar, canli durumlari ve firmware
     dagilimi. Sahalik ariza tespiti icin 'ne zamandir susuyor' bilgisi kritik."""
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     # Cihaz basina son olcum zamanini tek sorguda al -- her cihaz icin ayri
     # sorgu atmak filo buyudukce N+1'e donusurdu.
@@ -1581,7 +1660,7 @@ def admin_fleet(user: str = Depends(require_admin)):
 def get_latest_firmware(device_type: str, user: str = Depends(require_auth)):
     if device_type not in VALID_DEVICE_TYPES:
         raise HTTPException(status_code=400, detail="Geçersiz cihaz tipi")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(
         "SELECT version, filename, sha256, uploaded_at FROM firmware_builds "
@@ -1605,7 +1684,7 @@ def get_device_firmware(device_id: str, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     device_type = device_type_from_id(device_id)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT fw_version FROM device_settings WHERE device_id = %s", (device_id,))
     row = cur.fetchone()
@@ -1635,7 +1714,7 @@ def trigger_ota(device_id: str, user: str = Depends(require_auth)):
     if not device_type:
         raise HTTPException(status_code=400, detail="Cihaz tipi belirlenemedi")
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(
         "SELECT version, filename, sha256 FROM firmware_builds WHERE device_type = %s ORDER BY uploaded_at DESC LIMIT 1",
@@ -1722,7 +1801,7 @@ def get_alarm_rules(device_id: str):
         if fresh:
             return _alarm_cache["rules"].get(device_id, [])
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = db_connect()
         cur = conn.cursor()
         cur.execute("""
             SELECT id, device_id, metric, phase, condition, threshold, offline_minutes, is_active
@@ -1768,7 +1847,7 @@ def alarm_notify(device_id: str, subject: str, body: str):
     def _send():
         device_name = device_id
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = db_connect()
             cur = conn.cursor()
             cur.execute("SELECT name FROM devices WHERE device_id = %s", (device_id,))
             row = cur.fetchone()
@@ -1888,7 +1967,7 @@ def alarm_offline_watchdog():
     while True:
         time.sleep(60)
         try:
-            conn = psycopg2.connect(**DB_CONFIG)
+            conn = db_connect()
             conn.autocommit = True
             cur = conn.cursor()
             cur.execute("""
@@ -1929,7 +2008,7 @@ def alarm_offline_watchdog():
 def list_alarm_rules(device_id: str, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT id, metric, phase, condition, threshold, offline_minutes, enabled, is_active, last_triggered_at
@@ -1970,7 +2049,7 @@ def create_alarm_rule(device_id: str, req: AlarmRuleRequest, user: str = Depends
             raise HTTPException(status_code=400, detail="Eşik değeri gerekli")
         threshold, offline_minutes = req.threshold, None
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT count(*) FROM alarm_rules WHERE device_id = %s", (device_id,))
     if cur.fetchone()[0] >= 20:
@@ -1991,7 +2070,7 @@ def create_alarm_rule(device_id: str, req: AlarmRuleRequest, user: str = Depends
 
 @app.patch("/alarm-rules/{rule_id}")
 def update_alarm_rule(rule_id: int, enabled: bool, user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT device_id FROM alarm_rules WHERE id = %s", (rule_id,))
     row = cur.fetchone()
@@ -2011,7 +2090,7 @@ def update_alarm_rule(rule_id: int, enabled: bool, user: str = Depends(require_a
 
 @app.delete("/alarm-rules/{rule_id}")
 def delete_alarm_rule(rule_id: int, user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT device_id FROM alarm_rules WHERE id = %s", (rule_id,))
     row = cur.fetchone()
@@ -2032,7 +2111,7 @@ def list_alarm_events(device_id: str, limit: int = 50, user: str = Depends(requi
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     limit = max(1, min(limit, 200))
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT id, rule_id, triggered_at, resolved_at, trigger_value, message
@@ -2094,7 +2173,7 @@ def append_to_google_sheet(c: RegisterRequest):
 @app.post("/login")
 def login(credentials: LoginRequest, request: Request):
     check_rate_limit(f"login:{client_ip(request)}", max_attempts=15, window_seconds=15 * 60)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT password_hash, is_verified FROM users WHERE username = %s", (credentials.username,))
     row = cur.fetchone()
@@ -2118,7 +2197,7 @@ def register(credentials: RegisterRequest, request: Request):
 
     password_hash = bcrypt.hashpw(credentials.password.encode(), bcrypt.gensalt()).decode()
     token = secrets.token_urlsafe(32)
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     try:
@@ -2159,7 +2238,7 @@ def register(credentials: RegisterRequest, request: Request):
 
 @app.get("/verify", response_class=HTMLResponse)
 def verify_email(token: str):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     conn.autocommit = True
     cur = conn.cursor()
     cur.execute(
@@ -2183,7 +2262,7 @@ def verify_email(token: str):
 def get_measurements(device_id: str, minutes: int = 60, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     since = datetime.utcnow() - timedelta(minutes=minutes)
     cur.execute("""
@@ -2209,7 +2288,7 @@ def get_measurements(device_id: str, minutes: int = 60, user: str = Depends(requ
 def get_energy(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT active_wh_tuketim, inductive_varh_tuketim, capacitive_varh_tuketim,
@@ -2267,7 +2346,7 @@ def get_energy_hourly(device_id: str, format: str = "json", days: int = 7, user:
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     days = max(1, min(days, 90))
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     select_parts = ", ".join(
         f"{full} AS {short}, {_hourly_delta_sql(short, full)} AS delta_{short}"
@@ -2366,7 +2445,7 @@ STATS_JSON_KEYS = [
 def get_stats(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(f"""
         SELECT time, {', '.join(STATS_COLUMNS)}
@@ -2408,7 +2487,7 @@ PEAKS_JSON_KEYS = [
 def get_peaks(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(f"""
         SELECT DISTINCT ON (direction) direction, time, {', '.join(PEAKS_COLUMNS)}
@@ -2445,7 +2524,7 @@ DEMAND_JSON_KEYS = [
 def get_demand(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(f"""
         SELECT DISTINCT ON (direction) direction, time, {', '.join(DEMAND_COLUMNS)}
@@ -2467,7 +2546,7 @@ HARMONICS_COLUMNS = ["thd1", "thd2", "thd3"] + [
 def get_harmonics(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(f"""
         SELECT DISTINCT ON (signal_type) signal_type, time, {', '.join(HARMONICS_COLUMNS)}
@@ -2490,7 +2569,7 @@ INFO_COLUMNS = [
 def get_info(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute(f"""
         SELECT {', '.join(INFO_COLUMNS)}, updated_at FROM device_info WHERE device_id = %s
@@ -2547,7 +2626,7 @@ def send_device_command(device_id: str, payload: DeviceCommandRequest, user: str
     # reset_password çalıştırmasını engelliyor (bkz. architecture.md güvenlik notları).
     if cmd["risk"] == "high":
         check_rate_limit(f"highrisk:{user}", max_attempts=5, window_seconds=60 * 60)
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = db_connect()
         cur = conn.cursor()
         cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
         row = cur.fetchone()
@@ -2584,7 +2663,7 @@ class CtRatioRequest(BaseModel):
 def get_ct_ratio(device_id: str, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("SELECT ct_ratio, updated_at FROM device_settings WHERE device_id = %s", (device_id,))
     row = cur.fetchone()
@@ -2804,7 +2883,7 @@ def _analyze_bucket(row: dict, tariff: dict) -> dict:
 def get_tariff(device_id: str, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     tariff = _read_tariff(device_id, cur)
     cur.close()
@@ -2843,7 +2922,7 @@ def set_tariff(device_id: str, payload: TariffRequest, user: str = Depends(requi
             detail="Zaman dilimleri artan sırada olmalı (gündüz < puant < gece)")
     if payload.contract_power_kw is not None and payload.contract_power_kw <= 0:
         raise HTTPException(status_code=400, detail="Sözleşme gücü sıfırdan büyük olmalı")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO device_tariff (device_id, inductive_limit_pct, capacitive_limit_pct,
@@ -2897,7 +2976,7 @@ def reactive_report(device_id: str, period: str = "monthly", count: int = 12,
         unit = "day"
         since = datetime.now(timezone.utc) - timedelta(days=count)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     tariff = _read_tariff(device_id, cur)
     buckets = _reactive_buckets(device_id, unit, since, cur)
@@ -3139,7 +3218,7 @@ def bill_report(device_id: str, months: int = 12, format: str = "json",
     months = max(1, min(months, 36))
     since = datetime.now(timezone.utc) - timedelta(days=31 * months)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     tariff = _read_tariff(device_id, cur)
     tou = _tou_buckets(device_id, tariff, since, cur)
@@ -3413,7 +3492,7 @@ def build_monthly_pdf(device_id: str, year: int, month: int) -> bytes:
     _ensure_report_fonts()
     start, end = _month_bounds(year, month)
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     info = _report_device_info(device_id, cur)
     tariff = _read_tariff(device_id, cur)
@@ -3836,7 +3915,7 @@ class AlarmEmailPref(BaseModel):
 
 @app.post("/me/alarm-email")
 def set_alarm_email_pref(payload: AlarmEmailPref, user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("UPDATE users SET alarm_email = %s WHERE username = %s", (payload.enabled, user))
     conn.commit()
@@ -3847,7 +3926,7 @@ def set_alarm_email_pref(payload: AlarmEmailPref, user: str = Depends(require_au
 
 @app.post("/me/monthly-report")
 def set_monthly_report_pref(payload: MonthlyReportPref, user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("UPDATE users SET monthly_report = %s WHERE username = %s", (payload.enabled, user))
     conn.commit()
@@ -3868,7 +3947,7 @@ def send_monthly_reports(year: int | None = None, month: int | None = None) -> d
     if year is None or month is None:
         year, month = _previous_month()
 
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT username, email FROM users
@@ -3983,7 +4062,7 @@ def push_vapid_key():
 def push_subscribe(payload: PushSubscriptionRequest, user: str = Depends(require_auth)):
     if not PUSH_ENABLED:
         raise HTTPException(status_code=503, detail="Push bildirimi yapılandırılmamış")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     # Ayni endpoint baska bir hesaba aitse ona devrediyoruz: kullanici ayni
     # tarayicida hesap degistirdiginde eski hesaba bildirim gitmemeli.
@@ -4006,7 +4085,7 @@ def push_subscribe(payload: PushSubscriptionRequest, user: str = Depends(require
 
 @app.post("/push/unsubscribe")
 def push_unsubscribe(payload: PushUnsubscribeRequest, user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("DELETE FROM push_subscriptions WHERE endpoint = %s AND username = %s",
                 (payload.endpoint, user))
@@ -4018,7 +4097,7 @@ def push_unsubscribe(payload: PushUnsubscribeRequest, user: str = Depends(requir
 
 @app.get("/push/subscriptions")
 def push_list_subscriptions(user: str = Depends(require_auth)):
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         SELECT id, transport, user_agent, created_at, last_success
@@ -4090,7 +4169,7 @@ def push_notify(device_id: str, title: str, body: str, tag: str | None = None) -
         return 0
     sent = 0
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = db_connect()
         cur = conn.cursor()
         payload = {"title": title, "body": body, "url": SITE_URL,
                    "tag": tag or f"alarm-{device_id}"}
@@ -4307,7 +4386,7 @@ def get_power_quality(device_id: str, days: int = 7, user: str = Depends(require
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     days = max(1, min(days, 90))
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     try:
         return power_quality_report(device_id, days, cur)
@@ -4327,7 +4406,7 @@ def set_nominal_voltage(device_id: str, payload: NominalVoltageRequest,
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     if not 50 <= payload.nominal_voltage <= 1000:
         raise HTTPException(status_code=400, detail="Nominal gerilim 50 ile 1000 V arasında olmalı")
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     cur.execute("""
         INSERT INTO device_settings (device_id, nominal_voltage, updated_at)
@@ -4345,7 +4424,7 @@ connected_clients: list[tuple[WebSocket, str]] = []
 device_status: dict[str, dict] = {}  # device_id -> {"status": "online"|"offline", "changed_at": iso}
 
 def _websocket_subscription_ok(username: str) -> bool:
-    conn = psycopg2.connect(**DB_CONFIG)
+    conn = db_connect()
     cur = conn.cursor()
     try:
         cur.execute("SELECT organization_id FROM org_members WHERE username = %s LIMIT 1", (username,))
@@ -4400,6 +4479,8 @@ async def broadcast(data: dict, device_id: str):
 
 # ---------- MQTT: Ayrı thread'de dinle, DB'ye yaz + WS'e push et ----------
 def mqtt_thread():
+    # Uzun omurlu, autocommit baglanti -- havuza GIRMIYOR:
+    # havuzdan bir baglantiyi sonsuza kadar tutmak havuzu daraltirdi.
     conn = psycopg2.connect(**DB_CONFIG)
     conn.autocommit = True
     cur = conn.cursor()
