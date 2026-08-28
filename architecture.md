@@ -584,6 +584,34 @@ Kimlik doğrulaması istemez, sır açmaz; yalnızca ortamın kendini doğru tan
 
 Bu uç nokta olmadan "staging'e dağıttığını sanıp üretime dağıtmak" sessizce mümkün.
 
+### Staging'e giriş — tohumlama
+
+Staging şemadan sıfır kurulur, yani içinde hiç kullanıcı yoktur. Staging'de e-posta kapalı olduğu için normal kayıt akışı da işlemez (doğrulama linki hiçbir zaman gelmez). Bu yüzden:
+
+```bash
+ops/staging_tohumla.sh
+```
+
+Üretimden **hesap/yapı verisini** kopyalar: kullanıcılar, organizasyon/tesis/departman, cihazlar, tarifeler, alarm kuralları, abonelikler. Üretim şifrenizle staging'e girebilirsiniz.
+
+**Kopyalanmaz:** ölçüm/zaman serisi tabloları (devasa olabilir, staging zaten aynı MQTT akışından kendi verisini biriktiriyor) ve ortama özgü geçmiş (alarm olayları, denetim kaydı, davetler, push abonelikleri).
+
+Betik kopyalama sonrası dizileri sahibi sütunun maksimumuna hizalar — yoksa staging'de yeni kayıt açmak birincil anahtar çakışmasıyla patlar. Dizi taraması `public` şemasıyla sınırlı: TimescaleDB'nin `_timescaledb_catalog` dizileri de sorguya takılıp hatayla düşürüyordu.
+
+### Mobil build varyantları
+
+| | iOS | Android |
+|---|---|---|
+| Staging | Debug yapılandırması | `debug` build type |
+| Üretim | Release yapılandırması | `release` build type |
+| Ayrım | `#if DEBUG` | `buildConfigField` |
+
+**Android** ayrıca `applicationIdSuffix = ".staging"` kullanıyor: `com.binaryenerji.app.staging` ile `com.binaryenerji.app` aynı telefonda **yan yana kurulabiliyor**, staging denemek için üretim uygulamasını kaldırmak gerekmiyor. Launcher etiketi de "Binary Enerji (Staging)". FileProvider yetkilisi zaten `${applicationId}.fileprovider` olduğu için ek kimlikle çakışmıyor.
+
+**iOS**'ta ayrı scheme/xcconfig yerine hazır `DEBUG` bayrağı kullanıldı — proje dosyasına dokunmuyor.
+
+Her iki uygulamada cihaz listesi başlığında **STAGING rozeti** var. Staging verisine üretim sanıp bakmak, tarife rakamlarında yaşanan hatanın aynı sınıfı.
+
 ### Frontend ortam bağımsızlığı
 
 `API_BASE` ve `WS_URL` artık `window.location.origin`'den türetiliyor. Sabit yazılıydı (`https://binaryenerji.com/api`) — staging bundle'ı üretim API'sini çağırırdı, yani staging hiçbir şeyi izole etmezdi. Yerel geliştirmede (`import.meta.env.DEV`) üretime düşer.
