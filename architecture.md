@@ -873,6 +873,49 @@ okumam; tarifede olduğu gibi müşteri kendi şebeke işletmecisiyle teyit etme
 `device_settings.nominal_voltage` (varsayılan 230 V, `POST
 /devices/{id}/nominal-voltage` ile değiştirilebilir) — sınırlar Un'e göreli.
 
+
+### 5.16 Abonelik Altyapısı (28 Ağustos 2026)
+
+Sistemde hiçbir para toplama mekanizması yoktu. Model, Türkiye'de sanayi B2B
+satışının gerçekte nasıl işlediğine göre seçildi: **cihaz başına ücret,
+fatura/havale ile ödeme, yönetici panelinden elle aktivasyon.** Ödeme sağlayıcı
+entegrasyonu yok ve şema bunu varsaymıyor — iyzico/PayTR ileride bu katmanı
+değiştirmeden eklenebilir.
+
+**Süre bitiminde veri toplama DURMAZ.** MQTT akışı ve alarm değerlendirmesi
+aboneliğe hiç bakmıyor (kod içinde doğrulandı: `mqtt_thread`, `evaluate_alarms`
+ve `alarm_notify` içinde tek bir abonelik referansı yok). Müşterinin geçmişini
+kaybettirmek, onu geri kazanmayı değersiz kılardı.
+
+**Neyin kilitlendiği bilinçli:** 12 veri uç noktası korumalı. `/me`, `/devices`,
+`/organization`, `/subscription`, push ve cihaz yönetimi **açık** — kilitli
+müşteri boş bir ekranla değil, sebebiyle karşılaşmalı; ayrıca OTA'yı kilitlemek
+cihazı bozuk firmware'de bırakabilirdi.
+
+**WebSocket ayrı kontrol gerektirdi.** `Depends()` WebSocket rotalarında
+çalışmıyor, bu yüzden `/ws/live` süresi dolmuş müşteriye canlı veri akıtmaya
+devam ediyordu — panelin en değerli parçası. Artık elle doğruluyor ve **hata
+durumunda açık kalıyor**: yanlış bir kilit, kısa süreli bir sızıntıdan kötüdür.
+
+**`expired` saklanmıyor, hesaplanıyor.** Her istekte `valid_until`'den
+türetiliyor; zamanlanmış bir iş çalışmadı diye süresi geçmiş abonelik açık
+kalamaz. Uzatma mevcut bitiş tarihinin **üzerine** ekleniyor, kalan süre yanmaz.
+
+**Yakalanan hata:** `ensure_subscription`, abonelik zaten varken de denetim
+izine 'created' kaydı yazıyordu; olay eklemesi koşulsuz çalışıyordu. `RETURNING`
+ile düzeltildi. Bu iz fatura mutabakatının kendisi olduğu için içindeki sahte
+kayıt kozmetik bir sorun değil.
+
+**Şema:** `subscriptions` (organizasyon başına tek satır) + `subscription_events`
+(denetim izi: ne zaman, kaç cihaz için, ne kadara açıldı). Yeni organizasyon
+30 günlük denemeyle başlıyor; göç, mevcut organizasyonları kilitlememek için
+onları aktif olarak işaretledi.
+
+**Doğrulama:** Süre bitimi kilitliyor ve geri açılıyor; cihaz limiti tam limitte
+engelliyor ve yan etki bırakmıyor; uzatma canlı aboneliğe 180 gün ekliyor
+(değiştirmiyor); denetim izi eylem başına tek kayıt ve doğru tutar tutuyor
+(3 cihaz × 4.500 = 13.500 ₺).
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
