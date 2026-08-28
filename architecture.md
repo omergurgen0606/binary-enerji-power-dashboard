@@ -475,6 +475,12 @@ Bölüm 5.7'nin devamı — yukarıdaki "flaşlanıp test edilmedi" notu artık 
   - `/measurements` `401` dönerse (token geçersiz/süresi dolmuş) otomatik olarak `localStorage` temizlenip giriş formuna dönülür
   - Header'da "Çıkış Yap" butonu — token'ı temizler
 - **Bileşen yapısı (`src/App.jsx`):** `App` (üst seviye state: `token`, `devices`, `selectedDevice`) → giriş yoksa `AuthForm`, giriş varsa ve cihaz seçilmemişse `DeviceList` ("Cihazlarım"), bir cihaz seçilince `DeviceDashboard` (eski tek-cihazlı dashboard'un `device_id`'ye göre parametrik hali, `PhaseCard` ve grafiği içeriyor). Detaylar için bkz. bölüm 5.2.
+- **Panel sekmeleri (28 Ağustos 2026):** `DeviceDashboard` tek kaydırmada 15 bölüme kadar büyümüştü ve aranan bölüm bulunamıyordu. Bölümler beş sekmeye ayrıldı: **Canlı** (faz kartları / dalga formu / toplam enerji), **Fatura** (fatura analizi, reaktif ceza, demand, tüketim trendi), **Analiz** (sistem özeti, EN 50160 güç kalitesi, harmonikler, tepe değerleri), **Alarmlar**, **Cihaz** (cihaz bilgileri + ayarlar).
+  - Demand bilerek "Analiz"de değil **Fatura**da: 15 dakikalık demand, sözleşme gücü aşım cezasını doğrudan belirliyor.
+  - Sekme çubuğu yapışkan (`position: sticky`); uzun bir bölümü kaydırırken diğer sekmelere erişim kaybolmuyor.
+  - Alarmlar sekmesinde **çözülmemiş** alarm sayısı rozet olarak duruyor (`resolved_at IS NULL`), böylece sekme kapalıyken de görülüyor. 30 saniyede bir yenileniyor; rozet kritik olmadığı için hata sessizce yutuluyor.
+  - Seçili sekme `localStorage`'da (`dash-tab`) saklanıyor — iOS'ta `@AppStorage`, Android'de `rememberSaveable`.
+  - 560px altında sekmeler eşit genişlikte dağılıyor (yatay kaydırma gerekmiyor); stiller `src/index.css` içinde `.dash-tabs` / `.dash-tab` altında.
 - **Tasarım:** Entes Enerji Doktoru esintili, özgün palet:
   - Arka plan: `#F4F6F9`, kart: `#FFFFFF`, ana metin: `#0B1F3A`
   - Faz renkleri: L1 bakır `#C97A2B`, L2 teal `#1B7A72`, L3 indigo `#4A5FC1`
