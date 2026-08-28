@@ -713,6 +713,45 @@ artınca sıkıştırma/saklama politikaları fark edilmeden geri kalacaktı.
 **%57'si ceza** (reaktif %39, güç aşımı %18). Ürünün satış argümanı tam olarak
 bu tablo.
 
+
+### 5.13 Aylık PDF Enerji Raporu (28 Ağustos 2026)
+
+Panel, müşterinin **açmayı hatırlaması gereken** bir yer. Rapor ise her ayın
+1'inde kutusuna düşüyor — ürünün sunduğu değeri tekrarlayan hale getiren şey bu.
+
+**İçerik:** fatura kalem kalem (zaman dilimleri, güç aşımı, reaktif ceza,
+toplam), günlük tüketim grafiği, "bu dönemde dikkat edilmesi gerekenler" ve
+alarm özeti. Hiçbir hesap yeniden yazılmadı — rapor `/reports/bill`'i besleyen
+aynı fonksiyonları çağırıyor, dolayısıyla PDF ile panel çelişemez.
+
+**Öneriler bölümü** yalnızca veriden sayısal olarak desteklenen şeyleri
+söylüyor: gereken kompanzasyon kVAr'ı, kaç kW aşım ve tepenin tam olarak ne
+zaman oluştuğu, puant yükünü kaydırmanın tavanı. Kaydırma rakamının bir hedef
+değil **tavan** olduğu açıkça yazıyor. Genel geçer tavsiye yok.
+
+**Türkçe karakter:** reportlab'in yerleşik Helvetica'sı Latin-1; ğ/ş/ı
+basamıyor. Docker imajına `fonts-dejavu-core` eklendi, rapor DejaVuSans'ı
+gömüyor.
+
+**Gönderim:** kullanıcı başına **tek** e-posta, eriştiği her cihaz için bir PDF
+eki — cihaz başına ayrı e-posta çok cihazlı müşteride spam olurdu. Kapsam
+`_ACCESSIBLE_DEVICES_SQL` üzerinden çözülüyor, yani raporun kapsamı panelde
+görülen kapsamdan ayrışamaz. Cron (`0 6 1 * *`, `ops/monthly_report.sh`) modül
+fonksiyonunu doğrudan çağırıyor; böylece crontab'a yönetici token'ı koymak
+gerekmiyor. Manuel tetikleme için `POST /admin/monthly-reports`, kullanıcı
+bazında kapatmak için `POST /me/monthly-report` var.
+
+**Uygulamalarda:** fatura tablosunda ay bazında PDF indirme + profilde e-posta
+tercihi. iOS'ta indirilenler klasörü olmadığı için geçici dosya + sistem
+paylaşım sayfası; Android'de aynısı **FileProvider** ile (Android N'den beri
+`file://` URI paylaşmak `FileUriExposedException` atıyor — provider projede
+tanımlı değildi, eklenmeseydi derleme geçer ama butona basıldığı anda
+uygulama çökerdi).
+
+**Doğrulama:** PDF Türkçe karakterlerle ve panelle birebir aynı rakamlarla
+üretiliyor; toplu gönderim alıcıları doğru çözüyor (cihazı olmayan kullanıcı
+atlanıyor); Android'de paylaşım sayfası doğru dosya adıyla açılıyor, çökme yok.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
