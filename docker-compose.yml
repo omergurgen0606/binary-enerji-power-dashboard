@@ -51,6 +51,44 @@ services:
     networks:
       - power_net
 
+  # Staging: üretimle AYNI imaj, AYNI mosquitto akışı, AYRI veritabanı.
+  #
+  # Aynı MQTT akışını dinlemesi kasıtlı -- gerçek cihaz verisiyle test etmenin
+  # tek yolu bu. Ama bu yakınlık tehlikeli olurdu: api.py içindeki STAGING=1
+  # koruması e-posta, push bildirimi ve cihaz komutlarını kapatıyor, yani
+  # staging okur ama dış dünyaya hiçbir şey yazmaz (bkz. tests/test_staging.py).
+  #
+  # Avatar birimi de ayrı: paylaşılsaydı staging'de yüklenen bir dosya
+  # üretimdeki kullanıcının avatarının üstüne yazardı.
+  api-staging:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - mosquitto
+    environment:
+      DB_HOST: timescaledb
+      POSTGRES_DB: binaryenerji_staging
+      STAGING: "1"
+      PYTHONUNBUFFERED: "1"
+      MQTT_BROKER: mosquitto
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      MQTT_USER: ${MQTT_USER}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      DEVICE_CLAIM_SECRET: ${DEVICE_CLAIM_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY}
+      RESEND_FROM: ${RESEND_FROM}
+      GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID}
+      GOOGLE_SERVICE_ACCOUNT_FILE: /app/google-service-account.json
+    volumes:
+      - /root/google-service-account.json:/app/google-service-account.json:ro
+      - avatar_uploads_staging:/app/uploads
+    ports:
+      - "127.0.0.1:8001:8000"
+    networks:
+      - power_net
+
 networks:
   power_net:
 
@@ -60,3 +98,4 @@ volumes:
   mosquitto_data:
   mosquitto_log:
   avatar_uploads:
+  avatar_uploads_staging:

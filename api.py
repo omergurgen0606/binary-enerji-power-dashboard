@@ -216,6 +216,36 @@ SITE_URL = "https://binaryenerji.com"
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("binaryenerji")
 
+# Staging, uretimle ayni kodu ve ayni MQTT akisini kullanir ama AYRI bir
+# veritabanina yazar ve DIS DUNYAYA HICBIR SEY GONDERMEZ. Cikis noktalarini
+# tek tek cagri yerlerinde degil, kaynaginda kapatiyoruz: yarin eklenecek yeni
+# bir e-posta/bildirim cagrisi da otomatik olarak kapsanir, kimsenin
+# "staging mi?" diye sormasi gerekmez.
+IS_STAGING = os.environ.get("STAGING") == "1"
+
+def _staging_eposta_yutucu(payload, *args, **kwargs):
+    logger.info("[STAGING] e-posta gonderilmedi -> %s | %s",
+                payload.get("to"), payload.get("subject"))
+    return {"id": "staging-gonderilmedi"}
+
+
+def _staging_korumalarini_uygula():
+    """resend'in gonderim fonksiyonunu yutucuyla degistirir.
+
+    Ayri bir fonksiyon olmasinin sebebi test edilebilirlik: korumanin
+    gercekten baglandigini dogrulayan bir test yazilabilsin diye.
+    """
+    logger.warning("STAGING modu: e-posta, push bildirimi ve cihaz komutlari kapali")
+    resend.Emails.send = _staging_eposta_yutucu
+
+
+if IS_STAGING:
+    _staging_korumalarini_uygula()
+    # Staging'de uretilen bir token uretimde GECERLI OLMAMALI. Ayni sirri
+    # paylassalardi staging'de acilan bir oturum uretim panelini de acardi.
+    # Ayri bir ortam degiskeni yerine turetiyoruz: eklemeyi unutmak mumkun degil.
+    JWT_SECRET = hashlib.sha256(("staging:" + JWT_SECRET).encode()).hexdigest()
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
@@ -2039,6 +2069,33 @@ def alarm_offline_watchdog():
             logger.error("Cevrimdisi alarm kontrolu hatasi: %s", e)
 
 
+@app.get("/health")
+def health():
+    """Dağıtım doğrulaması için: hangi ortam, hangi veritabanı, ayakta mı.
+
+    Kimlik doğrulaması istemez ama hassas hiçbir şey de açmaz -- sürüm veya
+    sır değil, yalnızca ortamın kendini doğru tanıyıp tanımadığı. Staging'e
+    dağıttığını sanıp üretime dağıtmak bu uç nokta olmadan sessizce mümkün.
+    """
+    try:
+        conn = db_connect()
+        cur = conn.cursor()
+        cur.execute("SELECT 1")
+        cur.fetchone()
+        cur.close()
+        conn.close()
+        db_ok = True
+    except Exception as e:
+        logger.error("Saglik kontrolu: veritabanina ulasilamadi: %s", e)
+        db_ok = False
+    return {
+        "ortam": "staging" if IS_STAGING else "uretim",
+        "veritabani": DB_CONFIG.get("dbname"),
+        "veritabani_erisimi": db_ok,
+        "dis_bildirimler": "kapali" if IS_STAGING else "acik",
+    }
+
+
 @app.get("/devices/{device_id}/alarm-rules")
 def list_alarm_rules(device_id: str, user: str = Depends(require_auth)):
     if not is_device_owner(user, device_id):
@@ -2624,6 +2681,13 @@ class DeviceCommandRequest(BaseModel):
     password: str | None = None  # sadece "risk": "high" komutlar için zorunlu
 
 def publish_command(device_id: str, register: int, value: int = 1):
+    if IS_STAGING:
+        # Staging uretimle AYNI mosquitto'yu dinliyor; komut yayinlarsa gercek
+        # sahadaki cihaza gider. Okuma paylasilabilir, yazma asla.
+        logger.warning("[STAGING] cihaz komutu engellendi: %s register=%s", device_id, register)
+        raise HTTPException(
+            status_code=503,
+            detail="Staging ortamından gerçek cihaza komut gönderilemez.")
     connected_evt = threading.Event()
 
     def on_connect(c, userdata, flags, rc, properties=None):
@@ -4172,6 +4236,9 @@ def _push_recipients(device_id: str, cur) -> list[tuple]:
 
 def _push_send_one(sub_id: int, endpoint: str, p256dh: str, auth: str,
                    payload: dict, cur) -> bool:
+    if IS_STAGING:
+        logger.info("[STAGING] push bildirimi gonderilmedi (abonelik %s)", sub_id)
+        return True
     from pywebpush import webpush, WebPushException
     try:
         webpush(

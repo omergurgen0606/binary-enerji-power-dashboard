@@ -43,7 +43,9 @@ echo "  ✓ baseline üretimle aynı"
 # Kopya /app'e DEĞİL, ayrı bir dizine açılıyor: üretim konteynerinin çalışan
 # kodu test yüzünden hiçbir zaman değişmemeli.
 echo "→ çalışma kopyası konteynere alınıyor"
-CID=$(ssh "$HOST" "docker ps -qf name=root-api")
+# Tam eşleşme şart: "name=root-api" staging ayağa kalktığında root-api-1 ile
+# root-api-staging-1'i birlikte döndürür ve docker exec bozuk komutla asılır.
+CID=$(ssh "$HOST" "docker ps -qf 'name=^root-api-1\$'")
 RUNDIR=/tmp/binaryenerji-test
 ssh "$HOST" "docker exec $CID sh -c 'rm -rf $RUNDIR && mkdir -p $RUNDIR'"
 tar czf - -C "$REPO" tests api.py | ssh "$HOST" "docker exec -i $CID tar xzf - -C $RUNDIR"
