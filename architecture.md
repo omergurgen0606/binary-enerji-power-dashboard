@@ -838,6 +838,41 @@ geçersiz token'a HTTP 410 dönmesi imzanın kabul edildiğini kanıtlıyor — 
 410 temizliği aboneliği siliyor. **Canlı sitede uçtan uca doğrulandı** (28 Ağustos
 2026): bildirim teslim edildi, çözüldü ve ekranda göründü.
 
+
+### 5.15 Güç Kalitesi — EN 50160 Değerlendirmesi (28 Ağustos 2026)
+
+Cihaz gerilim, frekans ve gerilim harmonik bozulmasını zaten ölçüyordu; bu iş
+onu standarda karşı bir değerlendirmeye çeviriyor. Ekipman arızası yaşayan bir
+fabrikaya **ayrıca satılabilir** bir modül.
+
+**Neden ayrı bir 10 dakikalık özet:** EN 50160 bütün sınırlarını **10 dakikalık
+ortalamalar** üzerinden tanımlar. `measurements_15min` güç aşım cezası için var
+ve 15 dakika o iş için doğru aralık; 15 dakikalık veriyle "EN 50160 raporu"
+demek ölçüm yöntemini yanlış beyan etmek olurdu. Ek maliyet cihaz başına
+~18 MB/yıl — veri katmanı düzeltmesinden sonra ihmal edilebilir.
+
+**Ölçüm yapılmayan aralıklar:** Cihaz kapalıyken frekans ve gerilim sıfır
+okunuyor. Bunları istatistiğe katmak her fişten çekilişte "gerilim sıfıra
+düştü, felaket ihlal" raporu üretirdi. Geçerlilik filtresi
+(`45 ≤ frekans ≤ 55` **ve** en az bir fazda `gerilim ≥ 50 V`) ile ayrılıyor,
+ayrıca "ölçüm yok" olarak raporlanıyor. Rapor, **besleme kesintisi ile kapalı
+sayacın veriden ayırt edilemediğini** açıkça söylüyor.
+
+**Üç durumlu sonuç:** `pass` alanı `true/false/null`. Verisi olmayan parametre
+"ölçülmedi" diyor — yokluğu başarısızlık gibi göstermek yanıltıcı olurdu ve ilk
+sürümde tam bunu yapıyordu (anl13'te THD verisi yokken "KALDI" görünüyordu).
+Kapsama dönemin yarısının altındaysa karar `yetersiz_veri`; standart kesintisiz
+bir hafta bekliyor.
+
+**Dürüstlük sınırı:** Rapor değerlendirmediklerini **listeliyor** (flicker Plt,
+tek tek harmonik mertebeleri, gerilim dengesizliği, düşme/kesinti olay sayımları)
+ve resmî uygunluk belgesi olmadığını yazıyor. Kodlanan sınırlar standardın benim
+okumam; tarifede olduğu gibi müşteri kendi şebeke işletmecisiyle teyit etmeli.
+
+**Endpoint:** `GET /reports/power-quality?device_id=&days=`. Nominal gerilim
+`device_settings.nominal_voltage` (varsayılan 230 V, `POST
+/devices/{id}/nominal-voltage` ile değiştirilebilir) — sınırlar Un'e göreli.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
