@@ -32,7 +32,9 @@ from pydantic import BaseModel
 DB_CONFIG = {
     "host": os.environ.get("DB_HOST", "timescaledb"),
     "port": 5432,
-    "dbname": "postgres",
+    # Testler ayri bir veritabani kullanabilsin diye ortamdan okunuyor.
+    # Uretimde tanimli degil, varsayilan "postgres".
+    "dbname": os.environ.get("POSTGRES_DB", "postgres"),
     "user": "postgres",
     "password": os.environ["POSTGRES_PASSWORD"]
 }
