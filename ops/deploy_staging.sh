@@ -31,6 +31,28 @@ else
   echo "  mevcut"
 fi
 
+# Şema kayması: staging bir kez kurulup sonra üretime göç uygulanırsa staging
+# geride kalır ve uygulama orada eksik sütunla patlar -- test paketindeki aynı
+# kontrolün staging karşılığı. Sütun düzeyinde bakılıyor, tablo düzeyinde değil:
+# kaymanın bu sefer geldiği yer yeni bir tablo değil, yeni bir SÜTUNDU.
+echo "→ şema kayması kontrolü (üretim ↔ staging)"
+# Yalnizca TEMEL TABLOLAR karsilastiriliyor. Sürekli toplamalar (measurements_15min
+# gibi TimescaleDB materialized view'lari) staging'de yok ve bu kontrolü sürekli
+# kirmiyor olmalari gerekiyor -- uygulamanin YAZDIGI yer tablolar; eksik bir
+# sütun orada patlar, eksik bir rollup yalnizca daha yavas sorgu demek.
+SEMA_SQL="SELECT c.table_name||'.'||c.column_name FROM information_schema.columns c JOIN information_schema.tables t ON t.table_schema=c.table_schema AND t.table_name=c.table_name WHERE c.table_schema='public' AND t.table_type='BASE TABLE' ORDER BY 1"
+U_SEMA=$(ssh "$HOST" "docker exec \$(docker ps -qf name=timescaledb) psql -U postgres -d postgres -tAc \"$SEMA_SQL\"" | sort)
+S_SEMA=$(ssh "$HOST" "docker exec \$(docker ps -qf name=timescaledb) psql -U postgres -d $STAGING_DB -tAc \"$SEMA_SQL\"" | sort)
+EKSIK=$(comm -23 <(echo "$U_SEMA") <(echo "$S_SEMA"))
+if [ -n "$EKSIK" ]; then
+  echo "✗ ŞEMA KAYMASI: üretimde olup staging'de olmayan sütunlar:" >&2
+  echo "$EKSIK" | sed 's/^/    /' >&2
+  echo "  İlgili göçü staging'e de uygulayın:" >&2
+  echo "    ssh $HOST \"docker exec -i \\\$(docker ps -qf name=timescaledb) psql -U postgres -d $STAGING_DB\" < ops/schema/<goc>.sql" >&2
+  exit 1
+fi
+echo "  ✓ staging üretimle aynı"
+
 echo "→ nginx staging bloğu"
 scp -q "$REPO/ops/nginx-staging.conf" "$HOST:/etc/nginx/sites-available/dashboard-staging"
 ssh "$HOST" "ln -sf /etc/nginx/sites-available/dashboard-staging /etc/nginx/sites-enabled/dashboard-staging && \
