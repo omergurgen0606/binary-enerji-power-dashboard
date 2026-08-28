@@ -532,7 +532,65 @@ Bölüm 5.7'nin devamı — yukarıdaki "flaşlanıp test edilmedi" notu artık 
 | Google Sheets'e yazarken `PermissionError: PermissionError()` (mesaj boş) | Yanıltıcı bir hata — dosya izin sorunu değil (`cat` ile container içinden dosya okunabiliyordu, sahiplik/mod doğruydu). Gerçek sebep: Google Cloud projesinde **"Google Sheets API" etkinleştirilmemişti** — Sheets API'nin döndürdüğü `403 Forbidden`'ı `gspread` kütüphanesi Python'un yerleşik `PermissionError`'ına çeviriyor. "APIs & Services" → "Enable APIs and services" → "Google Sheets API" ile etkinleştirilince düzeldi. (Not: Sheet'in servis hesabıyla paylaşılmış olması **yetmiyor**, API'nin proje genelinde de etkin olması gerekiyor.) |
 | Resend domain doğrulaması "DNS invalid" — SPF (MX+TXT) sürekli başarısız | hosting.com.tr DNS panelinde `send` MX kaydının **Değer** alanına girilen `feedback-smtp.ap-northeast-1.amazonses.com` değerinin sonuna panel otomatik olarak `.binaryenerji.com. send` gibi fazladan metin ekliyordu (kayıt silinip aynı şekilde yeniden eklense bile tekrarlanan bir panel davranışı). Değerin sonuna elle bir nokta (`.`) eklenerek (`feedback-smtp.ap-northeast-1.amazonses.com.`, standart DNS "tam adres" gösterimi) panelin otomatik tamamlama mantığı devre dışı bırakıldı, kayıt doğru kaydedildi |
 
-## 9. Sonraki Adım Fikirleri (Henüz Yapılmadı)
+## 9. Dağıtım ve Staging Ortamı
+
+**Neden var:** 28 Ağustos 2026'da bağlantı havuzu hatası doğrudan üretime gitti ve 22 yazma uç noktası sessizce yazdıklarını atmaya başladı (bkz. bölüm 8). Hata yalnızca gerçek bir çalışan süreçte görünüyordu — birim testi değil, çalışan bir ortam gerekiyordu.
+
+### Ortamlar
+
+| | Üretim | Staging |
+|---|---|---|
+| Adres | `https://binaryenerji.com` | `https://binaryenerji.com:8443` |
+| API portu | 8000 | 8001 |
+| Veritabanı | `postgres` | `binaryenerji_staging` |
+| Web kökü | `/var/www/dashboard` | `/var/www/dashboard-staging` |
+| MQTT | aynı broker | **aynı broker** (gerçek cihaz verisi) |
+| E-posta / push / cihaz komutu | açık | **kapalı** |
+
+Staging, üretimle aynı imajı ve aynı MQTT akışını kullanır — gerçek cihaz verisiyle test etmenin tek yolu bu. Ayrı bir alt alan adı yerine **farklı port** kullanılıyor: DNS kaydı gerekmiyor ve mevcut sertifika `binaryenerji.com`'u kapsadığı için staging de HTTPS. Düz HTTP bir staging'e gerçek şifre yazılması kabul edilebilir değildi.
+
+### İzolasyon (yorum değil, testle bağlı sözleşme)
+
+`STAGING=1` ile:
+
+- **E-posta** — `resend.Emails.send` kaynağında yutucuyla değiştirilir. Tek tek çağrı yerleri korunsaydı yarın eklenecek yeni bir çağrı kapsam dışı kalırdı.
+- **Push bildirimi** — `_push_send_one` erken döner, `pywebpush` import bile edilmez.
+- **Cihaz komutu** — `publish_command` 503 ile reddeder. Staging üretimle aynı mosquitto'yu dinlediği için komut yayınlasa **sahadaki gerçek cihaza** giderdi. Okuma paylaşılır, yazma asla.
+- **Token sırrı** — `JWT_SECRET` staging'de türetilir (`sha256("staging:" + sır)`). Paylaşılsaydı staging'de açılan oturum üretim panelini de açardı. Ayrı ortam değişkeni yerine türetme seçildi: eklemeyi unutmak mümkün değil.
+- **Avatar birimi** ayrı — paylaşılsaydı staging'de yüklenen dosya üretimdeki kullanıcının avatarının üstüne yazardı.
+
+Bunların hepsi `tests/test_staging.py` ile doğrulanıyor; korumanın fazla geniş kurulmadığı da test ediliyor (üretimde cihaz komutu engellenmemeli).
+
+### Betikler
+
+```bash
+ops/deploy_staging.sh   # staging'e dağıt + duman testi
+ops/deploy_api.sh       # ÜRETİME dağıt: önce testler, sonra /health doğrulaması
+ops/deploy_web.sh       # üretim web bundle'ı + yayındaki hash doğrulaması
+ops/test_calistir.sh    # test paketi (çalışma kopyasına karşı)
+```
+
+`deploy_staging.sh` yalnızca `api-staging` servisini kaldırır — üretim api'sine dokunmaz, ve sonunda üretimin hâlâ `"ortam":"uretim"` dediğini doğrular.
+
+`deploy_api.sh` testler geçmeden dağıtmaz (`TESTLERI_ATLA=1` yalnızca acil geri alma için) ve dağıtımdan sonra `/health` üzerinden ortamı, veritabanını ve erişimi doğrular.
+
+### `/health`
+
+Kimlik doğrulaması istemez, sır açmaz; yalnızca ortamın kendini doğru tanıyıp tanımadığını söyler:
+
+```json
+{"ortam":"uretim","veritabani":"postgres","veritabani_erisimi":true,"dis_bildirimler":"acik"}
+```
+
+Bu uç nokta olmadan "staging'e dağıttığını sanıp üretime dağıtmak" sessizce mümkün.
+
+### Frontend ortam bağımsızlığı
+
+`API_BASE` ve `WS_URL` artık `window.location.origin`'den türetiliyor. Sabit yazılıydı (`https://binaryenerji.com/api`) — staging bundle'ı üretim API'sini çağırırdı, yani staging hiçbir şeyi izole etmezdi. Yerel geliştirmede (`import.meta.env.DEV`) üretime düşer.
+
+---
+
+## 10. Sonraki Adım Fikirleri (Henüz Yapılmadı)
 
 - ~~Docker Compose ile tüm VPS servislerini tek dosyada yönetilebilir hale getirme~~ — **Tamamlandı (13 Ağustos 2026)**, bkz. bölüm 5
 - ~~Kullanıcı girişi (login) ekleyip dashboard'ı sadece yetkili kişilere açma~~ — **Tamamlandı (13 Ağustos 2026)**, bkz. bölüm 5.1

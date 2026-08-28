@@ -3,8 +3,13 @@ import axios from 'axios';
 import { LineChart, Line, BarChart, Bar, ComposedChart, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './index.css';
 
-const API_BASE = 'https://binaryenerji.com/api';
-const WS_URL = 'wss://binaryenerji.com/ws/live';
+// Paket ortamdan bağımsız: aynı bundle hem üretimde hem staging'de çalışır ve
+// her biri kendi API'sine gider. Sabit yazılsaydı staging bundle'ı üretim
+// API'sini çağırırdı -- yani staging hiçbir şeyi izole etmezdi.
+// Yerel geliştirmede (vite dev sunucusu) böyle bir /api yolu yok, üretime düşer.
+const API_ORIGIN = import.meta.env.DEV ? 'https://binaryenerji.com' : window.location.origin;
+const API_BASE = `${API_ORIGIN}/api`;
+const WS_URL = `${API_ORIGIN.replace(/^http/, 'ws')}/ws/live`;
 
 const PHASES = [
   { key: '1', color: 'var(--l1)', label: 'L1' },
