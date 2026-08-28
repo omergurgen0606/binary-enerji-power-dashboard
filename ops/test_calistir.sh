@@ -34,12 +34,22 @@ if [ -n "$FARK" ]; then
 fi
 echo "  ✓ baseline üretimle aynı"
 
-echo "→ testler kopyalanıyor"
+# ÇALIŞMA KOPYASI test edilir, yayındaki kod değil. Daha önce yalnızca
+# tests/ kopyalanıyordu ve pytest konteynerdeki /app/api.py'a -- yani zaten
+# yayınlanmış koda -- karşı koşuyordu; bu yüzden dağıtılmamış bir düzeltme
+# doğrulanamıyor, dağıtılmamış bir hata da yakalanamıyordu. Bağlantı havuzu
+# hatasında tam bu oldu.
+#
+# Kopya /app'e DEĞİL, ayrı bir dizine açılıyor: üretim konteynerinin çalışan
+# kodu test yüzünden hiçbir zaman değişmemeli.
+echo "→ çalışma kopyası konteynere alınıyor"
 CID=$(ssh "$HOST" "docker ps -qf name=root-api")
-tar czf - -C "$REPO" tests | ssh "$HOST" "docker exec -i $CID tar xzf - -C /app"
+RUNDIR=/tmp/binaryenerji-test
+ssh "$HOST" "docker exec $CID sh -c 'rm -rf $RUNDIR && mkdir -p $RUNDIR'"
+tar czf - -C "$REPO" tests api.py | ssh "$HOST" "docker exec -i $CID tar xzf - -C $RUNDIR"
 
 echo "→ pytest"
 ssh "$HOST" "docker exec -e POSTGRES_DB=$TEST_DB $CID sh -c '
   pip show pytest >/dev/null 2>&1 || pip install -q pytest
-  cd /app && python -m pytest tests -q --no-header -p no:cacheprovider
+  cd $RUNDIR && python -m pytest tests -q --no-header -p no:cacheprovider
 '"

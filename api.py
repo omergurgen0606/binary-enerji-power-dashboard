@@ -83,13 +83,31 @@ class _PooledConnection:
     cagri yeri degistirilmeden calisiyor.
     """
 
+    # Sarmalayicinin kendi alanlari. Bunun disindaki her sey asil baglantiya
+    # gider -- ozellikle "autocommit".
+    _KENDI_ALANLARI = frozenset({"_conn", "_pool", "_returned"})
+
     def __init__(self, conn, pool):
         self._conn = conn
         self._pool = pool
         self._returned = False
 
     def __getattr__(self, name):
+        # Kendi alanlarimiz __init__ icinde yazildigi icin buraya dusmezler;
+        # yine de duserlerse sonsuz ozyineleme yerine temiz hata verelim.
+        if name in _PooledConnection._KENDI_ALANLARI:
+            raise AttributeError(name)
         return getattr(self._conn, name)
+
+    def __setattr__(self, name, value):
+        # __getattr__ yalnizca OKUMAYI yakalar. Bu metot olmadan
+        # "conn.autocommit = True" sarmalayicinin ustune yaziliyor, asil
+        # baglanti autocommit=False kaliyor ve close() icindeki rollback
+        # yazilan her seyi sessizce geri aliyordu.
+        if name in _PooledConnection._KENDI_ALANLARI:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._conn, name, value)
 
     def close(self):
         if self._returned:
@@ -99,6 +117,13 @@ class _PooledConnection:
             # Yarim kalan / hatayla kesilmis islem bir sonraki kullaniciya
             # kirli baglanti olarak gecmesin.
             self._conn.rollback()
+        except Exception:
+            pass
+        try:
+            # Havuzdaki baglanti yeniden kullanildigi icin, bir cagiranin
+            # autocommit tercihi sonrakine miras kalmamali.
+            if self._conn.autocommit:
+                self._conn.autocommit = False
         except Exception:
             pass
         try:
