@@ -599,14 +599,16 @@ function PushToggle({ token }) {
   );
 }
 
-function MonthlyReportToggle({ token, enabled, onChanged }) {
+// E-posta tercihi anahtarı — aylık rapor ve alarm e-postası aynı desende,
+// tek bileşen kullanılıyor ki metin ve davranış ayrışmasın.
+function EmailPrefToggle({ token, path, enabled, title, description, onLabel, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
 
   async function toggle() {
     setBusy(true); setError('');
     try {
-      await axios.post(`${API_BASE}/me/monthly-report`, { enabled: !enabled },
+      await axios.post(`${API_BASE}${path}`, { enabled: !enabled },
         { headers: { Authorization: `Bearer ${token}` } });
       onChanged();
     } catch {
@@ -618,11 +620,8 @@ function MonthlyReportToggle({ token, enabled, onChanged }) {
 
   return (
     <div>
-      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Aylık Enerji Raporu</div>
-      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
-        Her ayın başında, bir önceki dönemin fatura dökümünü, tasarruf fırsatlarını ve alarm
-        özetini içeren PDF raporu e-posta ile gönderilir.
-      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{title}</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>{description}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
         <button type="button" onClick={toggle} disabled={busy} style={{
           padding: '8px 16px', borderRadius: 'var(--radius-xs)',
@@ -631,10 +630,10 @@ function MonthlyReportToggle({ token, enabled, onChanged }) {
           color: enabled ? 'var(--muted)' : '#fff',
           fontSize: 12, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
         }}>
-          {busy ? 'Kaydediliyor…' : enabled ? 'Raporu kapat' : 'Raporu aç'}
+          {busy ? 'Kaydediliyor…' : enabled ? 'Kapat' : 'Aç'}
         </button>
         <span style={{ fontSize: 12, color: enabled ? 'var(--accent)' : 'var(--muted)' }}>
-          {enabled ? 'Açık — her ayın 1\'inde gönderilecek' : 'Kapalı'}
+          {enabled ? onLabel : 'Kapalı'}
         </span>
         {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span>}
       </div>
@@ -729,7 +728,21 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
-              <MonthlyReportToggle token={token} enabled={profile.monthly_report} onChanged={fetchProfile} />
+              <EmailPrefToggle
+                token={token} path="/me/alarm-email" enabled={profile.alarm_email}
+                title="Alarm E-postaları"
+                description="Erişiminiz olan cihazlarda alarm oluştuğunda e-posta gönderilir."
+                onLabel="Açık" onChanged={fetchProfile}
+              />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
+              <EmailPrefToggle
+                token={token} path="/me/monthly-report" enabled={profile.monthly_report}
+                title="Aylık Enerji Raporu"
+                description="Her ayın başında, bir önceki dönemin fatura dökümünü, tasarruf fırsatlarını ve alarm özetini içeren PDF raporu e-posta ile gönderilir."
+                onLabel="Açık — her ayın 1'inde gönderilecek" onChanged={fetchProfile}
+              />
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>

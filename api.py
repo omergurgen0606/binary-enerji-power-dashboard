@@ -277,6 +277,28 @@ def is_device_owner(username: str, device_id: str) -> bool:
     return row is not None
 
 
+def users_with_device_access(device_id: str, cur) -> list[str]:
+    """Cihazi gorebilen kullanici adlari.
+
+    Kapsam _ACCESSIBLE_DEVICES_SQL'den geliyor ama o sorgu tek bir kullanici
+    adi bagliyor ve korelasyonlu alt sorguya cevrilemiyor; sorguyu kopyalayip
+    degistirmek yerine kullanici basina cagiriyoruz. Boylece bildirim kapsami
+    (alarm e-postasi, push, aylik rapor) panelde gorulen kapsamdan ayrisamaz.
+    """
+    # DISTINCT: bir kullanicinin birden fazla organizasyon uyeligi olabilir ve
+    # o durumda ayni kisi listeye iki kez girip alarmi iki kez alirdi.
+    cur.execute("SELECT DISTINCT username FROM org_members")
+    out = []
+    for (username,) in cur.fetchall():
+        cur.execute(
+            "SELECT 1 FROM (" + _ACCESSIBLE_DEVICES_SQL + ") AS accessible WHERE device_id = %s",
+            (username, device_id),
+        )
+        if cur.fetchone():
+            out.append(username)
+    return out
+
+
 def get_membership(username: str) -> dict | None:
     """Kullanicinin organizasyon uyeligi + kapsami."""
     conn = psycopg2.connect(**DB_CONFIG)
@@ -447,7 +469,7 @@ def get_me(user: str = Depends(require_auth)):
     cur = conn.cursor()
     cur.execute(
         "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at, "
-        "is_verified, role, monthly_report "
+        "is_verified, role, monthly_report, alarm_email "
         "FROM users WHERE username = %s",
         (user,),
     )
@@ -463,6 +485,7 @@ def get_me(user: str = Depends(require_auth)):
         "is_verified": row[7],
         "role": row[8],
         "monthly_report": row[9],
+        "alarm_email": row[10],
     }
 
 class ChangePasswordRequest(BaseModel):
@@ -1439,42 +1462,57 @@ def alarm_notify(device_id: str, subject: str, body: str):
     """Alarmi e-posta ve push ile duyurur. MQTT dongusunu bloklamamak icin
     ayri thread'de.
 
-    Iki kanalin ALICI KAPSAMI farkli: push, cihaza erisimi olan herkese
-    gidiyor (organizasyon hiyerarsisine gore); e-posta ise hala yalnizca
-    cihaz sahibine. E-postanin dar kapsami organizasyon yapisindan onceki
-    davranis -- bilincli olarak bu degisiklikte dokunulmadi, ayrica ele
-    alinmasi gerekiyor.
+    Iki kanal da AYNI kapsama gidiyor: cihaza erisimi olan herkes. (E-posta
+    eskiden yalnizca cihaz sahibine gidiyordu -- organizasyon hiyerarsisinden
+    onceki davranistan kalmaydi ve tesis/bolum yoneticileri alarmlari hic
+    gormuyordu.)
+
+    Alicilara ayri ayri gonderiliyor, tek e-postada coklu alici olarak degil:
+    ayni organizasyondaki kisilerin adreslerini birbirine gostermeye gerek yok.
     """
     def _send():
         device_name = device_id
         try:
             conn = psycopg2.connect(**DB_CONFIG)
             cur = conn.cursor()
-            cur.execute("""
-                SELECT u.email, d.name FROM devices d
-                JOIN users u ON u.username = d.owner_username
-                WHERE d.device_id = %s
-            """, (device_id,))
+            cur.execute("SELECT name FROM devices WHERE device_id = %s", (device_id,))
             row = cur.fetchone()
+            if row:
+                device_name = row[0]
+
+            izinli = users_with_device_access(device_id, cur)
+            alicilar = []
+            if izinli:
+                cur.execute("""
+                    SELECT email FROM users
+                    WHERE username = ANY(%s) AND alarm_email = true AND is_verified = true
+                      AND email IS NOT NULL AND email <> ''
+                """, (izinli,))
+                alicilar = [r[0] for r in cur.fetchall()]
             cur.close()
             conn.close()
-            if row:
-                device_name = row[1]
-            if not row or not row[0]:
-                logger.warning("Alarm bildirimi gonderilemedi, e-posta yok: %s", device_id)
-            else:
-                resend.Emails.send({
-                    "from": RESEND_FROM,
-                    "to": [row[0]],
-                    "subject": f"{subject} — {device_name}",
-                    "html": (
-                        f"<p><b>{device_name}</b> cihazında alarm durumu:</p>"
-                        f"<p style='font-size:15px'>{body}</p>"
-                        f"<p><a href='{SITE_URL}'>Panoyu aç</a></p>"
-                    ),
-                })
+
+            if not alicilar:
+                logger.warning("Alarm e-postasi icin alici yok: %s", device_id)
+            for email in alicilar:
+                try:
+                    resend.Emails.send({
+                        "from": RESEND_FROM,
+                        "to": [email],
+                        "subject": f"{subject} — {device_name}",
+                        "html": (
+                            f"<p><b>{device_name}</b> cihazında alarm durumu:</p>"
+                            f"<p style='font-size:15px'>{body}</p>"
+                            f"<p><a href='{SITE_URL}'>Panoyu aç</a></p>"
+                            f"<p style='font-size:12px;color:#6B7A90'>Bu e-postayı almak "
+                            f"istemiyorsanız hesap sayfanızdan alarm e-postalarını kapatabilirsiniz.</p>"
+                        ),
+                    })
+                except Exception as e:
+                    # Bir alicinin basarisiz olmasi digerlerini engellemesin.
+                    logger.error("Alarm e-postasi gonderilemedi (%s): %s", email, e)
         except Exception as e:
-            logger.error("Alarm e-postasi gonderilemedi (%s): %s", device_id, e)
+            logger.error("Alarm e-posta akisi hatasi (%s): %s", device_id, e)
 
         # Push, e-postadan bagimsiz: e-posta gonderimi patlasa bile bildirim
         # gitmeli (ve tersi).
@@ -3494,6 +3532,21 @@ class MonthlyReportPref(BaseModel):
     enabled: bool
 
 
+class AlarmEmailPref(BaseModel):
+    enabled: bool
+
+
+@app.post("/me/alarm-email")
+def set_alarm_email_pref(payload: AlarmEmailPref, user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET alarm_email = %s WHERE username = %s", (payload.enabled, user))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Alarm e-postası tercihi güncellendi", "enabled": payload.enabled}
+
+
 @app.post("/me/monthly-report")
 def set_monthly_report_pref(payload: MonthlyReportPref, user: str = Depends(require_auth)):
     conn = psycopg2.connect(**DB_CONFIG)
@@ -3688,20 +3741,7 @@ def _push_recipients(device_id: str, cur) -> list[tuple]:
     E-POSTASI hala yalnizca cihaz sahibine gidiyor; bu, organizasyon
     hiyerarsisinden onceki davranis ve ayrica ele alinmali.)
     """
-    cur.execute("SELECT DISTINCT username FROM push_subscriptions WHERE transport = 'webpush'")
-    adaylar = [r[0] for r in cur.fetchall()]
-    # Erisim kontrolu kullanici basina ayri calisiyor: _ACCESSIBLE_DEVICES_SQL
-    # icindeki kullanici parametresi tek bir degeri bagliyor, korelasyonlu alt
-    # sorguya donusturulemiyor. Sorguyu burada kopyalayip degistirmek yerine
-    # kullanici basina cagirmak, kapsam mantiginin tek yerde kalmasini saglıyor.
-    izinli = []
-    for username in adaylar:
-        cur.execute(
-            "SELECT 1 FROM (" + _ACCESSIBLE_DEVICES_SQL + ") AS accessible WHERE device_id = %s",
-            (username, device_id),
-        )
-        if cur.fetchone():
-            izinli.append(username)
+    izinli = users_with_device_access(device_id, cur)
     if not izinli:
         return []
     cur.execute("""
