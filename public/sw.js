@@ -4,6 +4,12 @@
 // gösteriliyor. Yük çözülemezse bildirim yine de gösteriliyor: alarmın
 // hiç görünmemesindense genel bir uyarı görünmesi daha iyi.
 
+// Yeni sürüm hemen devreye girsin: varsayılan davranışta güncellenen service
+// worker, eski sekmelerin hepsi kapanana kadar "bekliyor" durumunda kalıyor,
+// yani bir düzeltme yayınlandığında kullanıcıya günlerce ulaşmayabiliyor.
+self.addEventListener('install', () => self.skipWaiting());
+self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
+
 self.addEventListener('push', (event) => {
   let data = {};
   try {

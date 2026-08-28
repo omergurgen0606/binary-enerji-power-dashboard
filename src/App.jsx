@@ -525,6 +525,29 @@ function PushToggle({ token }) {
     }
   }
 
+  // Sunucuyu hiç kullanmadan, doğrudan service worker'dan bildirim gösterir.
+  // Bu görünüyorsa tarayıcı/işletim sistemi tarafı sağlamdır ve sorun teslimatta;
+  // görünmüyorsa bildirimler işletim sistemi düzeyinde engellenmiştir.
+  async function testLocal() {
+    setBusy(true); setError(''); setInfo('');
+    try {
+      const reg = await navigator.serviceWorker.getRegistration('/sw.js');
+      if (!reg) { setError('Service worker kayıtlı değil.'); return; }
+      await reg.showNotification('Binary Enerji — yerel test', {
+        body: 'Bu bildirim doğrudan tarayıcıdan gösterildi, sunucu kullanılmadı.',
+        icon: '/logo.png',
+        tag: 'yerel-test',
+      });
+      setInfo('Bildirim gösterildi. Ekranınızda görünmüyorsa sorun tarayıcı/işletim '
+        + 'sistemi ayarlarında: macOS → Sistem Ayarları → Bildirimler → Chrome açık olmalı, '
+        + 'Rahatsız Etmeyin kapalı olmalı.');
+    } catch (e) {
+      setError('Yerel bildirim gösterilemedi: ' + String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Anlık Bildirimler</div>
@@ -559,6 +582,14 @@ function PushToggle({ token }) {
           <span style={{ fontSize: 12, color: subscribed ? 'var(--accent)' : 'var(--muted)' }}>
             {subscribed === null ? '' : subscribed ? 'Bu tarayıcıda açık' : 'Kapalı'}
           </span>
+          {subscribed && (
+            <button type="button" onClick={testLocal} disabled={busy} style={{
+              padding: '8px 14px', borderRadius: 'var(--radius-xs)',
+              border: '1px solid var(--border)', background: 'var(--surface)',
+              color: 'var(--muted)', fontSize: 12, fontWeight: 600,
+              cursor: busy ? 'default' : 'pointer',
+            }}>Test bildirimi göster</button>
+          )}
         </div>
       )}
 
