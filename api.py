@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import hashlib
 import re
 import hmac
@@ -445,7 +446,8 @@ def get_me(user: str = Depends(require_auth)):
     conn = psycopg2.connect(**DB_CONFIG)
     cur = conn.cursor()
     cur.execute(
-        "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at, is_verified, role "
+        "SELECT first_name, last_name, username, email, phone, created_at, avatar_updated_at, "
+        "is_verified, role, monthly_report "
         "FROM users WHERE username = %s",
         (user,),
     )
@@ -460,6 +462,7 @@ def get_me(user: str = Depends(require_auth)):
         "avatar_url": avatar_url_for(row[2], row[6]),
         "is_verified": row[7],
         "role": row[8],
+        "monthly_report": row[9],
     }
 
 class ChangePasswordRequest(BaseModel):
@@ -2294,6 +2297,10 @@ BILLING_MODES = ("full", "excess")
 # Faturalama donemi yerel aya gore isler, UTC'ye gore degil.
 BILLING_TZ = "Europe/Istanbul"
 
+# Tek e-postaya eklenecek azami rapor sayisi -- cok cihazli musteride
+# e-postanin boyutu kontrolden cikmasin diye.
+MONTHLY_REPORT_MAX_DEVICES = 10
+
 # Zaman dilimi etiketleri -- istemcilerde de ayni sirayla gosteriliyor.
 TOU_LABELS = {"t1": "Gündüz", "t2": "Puant", "t3": "Gece"}
 
@@ -2886,6 +2893,471 @@ def _bill_xlsx(device_id: str, rows: list[dict], summary: dict, tariff: dict) ->
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{device_id}-fatura-analizi.xlsx"'},
     )
+
+
+# ---------- Aylik PDF raporu ----------
+# Panel, musterinin acmayi hatirlamasi gereken bir yer. Rapor ise her ayin
+# basinda kutusuna dusuyor: donemin faturasi kalem kalem, tasarruf firsatlari
+# ve alarm ozeti. Icerik zaten /reports/bill'de hesaplaniyor -- burada ikinci
+# bir hesap yok, ayni fonksiyonlar cagriliyor ki panel ile rapor arasinda
+# tutarsizlik olusamasin.
+
+REPORT_FONT = "DejaVuSans"
+REPORT_FONT_BOLD = "DejaVuSans-Bold"
+_FONTS_REGISTERED = False
+
+TR_MONTHS = ["Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+             "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"]
+
+
+def _ensure_report_fonts():
+    """reportlab'in yerlesik Helvetica'si Latin-1; Turkce g/s/i harflerini
+    basamiyor. DejaVu imajda kurulu (Dockerfile), bir kez kaydediyoruz."""
+    global _FONTS_REGISTERED
+    if _FONTS_REGISTERED:
+        return
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    base = "/usr/share/fonts/truetype/dejavu"
+    pdfmetrics.registerFont(TTFont(REPORT_FONT, f"{base}/DejaVuSans.ttf"))
+    pdfmetrics.registerFont(TTFont(REPORT_FONT_BOLD, f"{base}/DejaVuSans-Bold.ttf"))
+    _FONTS_REGISTERED = True
+
+
+def _month_bounds(year: int, month: int):
+    """Yerel ay siniri. Faturalama ayi yereldir, UTC degil -- bu yuzden yerel
+    ayin ilk ani hesaplanip UTC'ye cevriliyor."""
+    from zoneinfo import ZoneInfo
+    tz = ZoneInfo(BILLING_TZ)
+    start_local = datetime(year, month, 1, tzinfo=tz)
+    if month == 12:
+        end_local = datetime(year + 1, 1, 1, tzinfo=tz)
+    else:
+        end_local = datetime(year, month + 1, 1, tzinfo=tz)
+    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+
+
+def _previous_month(today: datetime | None = None) -> tuple[int, int]:
+    today = today or datetime.now(timezone.utc)
+    year, month = today.year, today.month
+    return (year - 1, 12) if month == 1 else (year, month - 1)
+
+
+def _report_device_info(device_id: str, cur) -> dict:
+    cur.execute("""
+        SELECT d.name, f.name, dep.name, o.name
+        FROM devices d
+        LEFT JOIN facilities f ON f.id = d.facility_id
+        LEFT JOIN departments dep ON dep.id = d.department_id
+        LEFT JOIN organizations o ON o.id = f.organization_id
+        WHERE d.device_id = %s
+    """, (device_id,))
+    row = cur.fetchone()
+    if not row:
+        return {"name": device_id, "facility": None, "department": None, "organization": None}
+    return {"name": row[0], "facility": row[1], "department": row[2], "organization": row[3]}
+
+
+def _report_alarm_summary(device_id: str, start, end, cur) -> list[dict]:
+    cur.execute("""
+        SELECT message, count(*), max(triggered_at),
+               count(*) FILTER (WHERE resolved_at IS NULL)
+        FROM alarm_events
+        WHERE device_id = %s AND triggered_at >= %s AND triggered_at < %s
+        GROUP BY message ORDER BY count(*) DESC LIMIT 8
+    """, (device_id, start, end))
+    return [{"message": r[0], "count": r[1], "last": r[2], "open": r[3]} for r in cur.fetchall()]
+
+
+def _report_daily_kwh(device_id: str, start, end, cur) -> list[tuple]:
+    """Ay icindeki gunluk aktif tuketim -- rapordaki cubuk grafik icin."""
+    cur.execute(f"""
+        WITH deltas AS (
+            SELECT (bucket AT TIME ZONE %s) AS local_time,
+                   {_hourly_delta_sql("active_tuketim", "active_wh_tuketim")} AS d_active
+            FROM device_energy_hourly
+            WHERE device_id = %s AND bucket >= %s AND bucket < %s
+            WINDOW w AS (ORDER BY bucket)
+        )
+        SELECT date_trunc('day', local_time)::date, SUM(d_active) / 1000.0
+        FROM deltas GROUP BY 1 ORDER BY 1
+    """, (BILLING_TZ, device_id, start, end))
+    return [(r[0], float(r[1] or 0)) for r in cur.fetchall()]
+
+
+def _report_recommendations(row: dict | None, reactive: dict | None, tariff: dict) -> list[str]:
+    """Rapordaki 'ne yapmali' bolumu. Sadece veriden dogrudan cikan, sayisal
+    olarak desteklenen oneriler -- genel tavsiye yazmiyoruz."""
+    tips: list[str] = []
+    if not row:
+        return tips
+
+    if reactive and reactive.get("suggested_kvar"):
+        tips.append(
+            f"Endüktif reaktif oranı %{reactive['inductive_pct']} ile "
+            f"%{tariff['inductive_limit_pct']:g} limitinin üzerinde. Aşımı kapatmak için "
+            f"yaklaşık {reactive['suggested_kvar']} kVAr kompanzasyon gerekiyor; "
+            f"bu dönem reaktif ceza {row['reactive_cost']:,.2f} ₺."
+        )
+    if (row.get("overrun_kw") or 0) > 0:
+        peak_txt = row["peak_time"].strftime("%d.%m.%Y %H:%M") if row.get("peak_time") else "—"
+        tips.append(
+            f"Tepe güç {row['peak_kw']} kW, sözleşme gücü {row['contract_power_kw']:g} kW — "
+            f"{row['overrun_kw']} kW aşım, {row['demand_cost']:,.2f} ₺ bedel. "
+            f"Tepe {peak_txt} anında oluştu; o saatteki yüklerin bir kısmı kaydırılabilirse "
+            f"aşım tamamen ortadan kalkabilir."
+        )
+    if row.get("max_shift_saving", 0) > 0:
+        tips.append(
+            f"Tüketimin %{row['puant_pct']}'i puant saatlerinde. Bu tüketimin tamamı gece "
+            f"tarifesine kaysaydı {row['max_shift_saving']:,.2f} ₺ daha az ödenirdi — bu "
+            f"ulaşılabilir bir hedef değil, tasarruf tavanı; kaydırılabilen yük kadarı gerçekleşir."
+        )
+    if not tips:
+        tips.append("Bu dönemde ceza doğuran bir aşım tespit edilmedi.")
+    return tips
+
+
+def build_monthly_pdf(device_id: str, year: int, month: int) -> bytes:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm
+    from reportlab.pdfgen import canvas as pdfcanvas
+    from reportlab.platypus import Paragraph, Frame
+
+    _ensure_report_fonts()
+    start, end = _month_bounds(year, month)
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    info = _report_device_info(device_id, cur)
+    tariff = _read_tariff(device_id, cur)
+    tou = _tou_buckets(device_id, tariff, start, cur)
+    demand = _demand_buckets(device_id, start, cur)
+    reactive_rows = {
+        r["bucket"]: r
+        for r in (_analyze_bucket(b, tariff)
+                  for b in _reactive_buckets(device_id, "month", start, cur))
+    }
+    daily = _report_daily_kwh(device_id, start, end, cur)
+    alarms = _report_alarm_summary(device_id, start, end, cur)
+    cur.close()
+    conn.close()
+
+    # Ilgilendigimiz ayin kovasini bul (yerel ayin ilk gunu).
+    key = next((k for k in tou if k.year == year and k.month == month), None)
+    row = None
+    if key is not None:
+        row = _analyze_bill_month(key, tou[key], demand.get(key), reactive_rows.get(key), tariff)
+    reactive = reactive_rows.get(key) if key is not None else None
+
+    buf = io.BytesIO()
+    c = pdfcanvas.Canvas(buf, pagesize=A4)
+    W, H = A4
+    ink = colors.HexColor("#0B1F3A")
+    muted = colors.HexColor("#6B7A90")
+    danger = colors.HexColor("#C23B3B")
+    accent = colors.HexColor("#1B7A72")
+    line = colors.HexColor("#DCE3EC")
+
+    def money(v):
+        return f"{v:,.2f} ₺".replace(",", " ")
+
+    # --- Baslik ---
+    c.setFillColor(ink)
+    c.rect(0, H - 32 * mm, W, 32 * mm, stroke=0, fill=1)
+    c.setFillColor(colors.white)
+    c.setFont(REPORT_FONT_BOLD, 17)
+    c.drawString(18 * mm, H - 15 * mm, "Aylık Enerji Raporu")
+    c.setFont(REPORT_FONT, 10)
+    c.drawString(18 * mm, H - 22 * mm, f"{TR_MONTHS[month - 1]} {year}")
+    c.setFont(REPORT_FONT_BOLD, 11)
+    c.drawRightString(W - 18 * mm, H - 15 * mm, info["name"])
+    c.setFont(REPORT_FONT, 8.5)
+    yer = " · ".join(x for x in (info["organization"], info["facility"], info["department"]) if x)
+    c.drawRightString(W - 18 * mm, H - 21 * mm, yer or device_id)
+    c.drawRightString(W - 18 * mm, H - 26 * mm, f"Rapor: {datetime.now().strftime('%d.%m.%Y')}")
+
+    y = H - 44 * mm
+
+    if row is None:
+        c.setFillColor(muted)
+        c.setFont(REPORT_FONT, 11)
+        c.drawString(18 * mm, y, "Bu dönemde cihazdan veri alınmadı.")
+        c.save()
+        return buf.getvalue()
+
+    # --- Fatura dokumu ---
+    c.setFillColor(ink)
+    c.setFont(REPORT_FONT_BOLD, 12)
+    c.drawString(18 * mm, y, "Fatura Dökümü")
+    y -= 8 * mm
+
+    priced = tariff["active_price"] > 0 or any(
+        tariff[k] > 0 for k in ("t1_price", "t2_price", "t3_price"))
+
+    kalemler = [
+        ("Gündüz", f"{row['t1_kwh']:,.1f} kWh", row["t1_cost"], False),
+        ("Puant", f"{row['t2_kwh']:,.1f} kWh"
+                  + (f"  (tüketimin %{row['puant_pct']}'i)" if row["puant_pct"] is not None else ""),
+         row["t2_cost"], (row["puant_pct"] or 0) > 25),
+        ("Gece", f"{row['t3_kwh']:,.1f} kWh", row["t3_cost"], False),
+    ]
+    if row.get("overrun_kw") is not None:
+        kalemler.append((
+            "Güç aşımı",
+            f"tepe {row['peak_kw']} kW / sözleşme {row['contract_power_kw']:g} kW"
+            + (f"  → +{row['overrun_kw']} kW" if row["overrun_kw"] > 0 else "  → aşım yok"),
+            row["demand_cost"], row["overrun_kw"] > 0))
+    if reactive:
+        kalemler.append((
+            "Reaktif ceza",
+            f"endüktif %{reactive['inductive_pct']} / kapasitif %{reactive['capacitive_pct']}"
+            f"  (limit %{tariff['inductive_limit_pct']:g} / %{tariff['capacitive_limit_pct']:g})",
+            row["reactive_cost"], row["reactive_cost"] > 0))
+
+    c.setFont(REPORT_FONT, 9.5)
+    for label, detay, tutar, vurgu in kalemler:
+        c.setStrokeColor(line)
+        c.line(18 * mm, y + 5 * mm, W - 18 * mm, y + 5 * mm)
+        c.setFillColor(danger if vurgu else ink)
+        c.setFont(REPORT_FONT_BOLD, 9.5)
+        c.drawString(18 * mm, y, label)
+        c.setFillColor(muted)
+        c.setFont(REPORT_FONT, 9)
+        c.drawString(48 * mm, y, detay)
+        if priced:
+            c.setFillColor(danger if vurgu else ink)
+            c.setFont(REPORT_FONT_BOLD if vurgu else REPORT_FONT, 9.5)
+            c.drawRightString(W - 18 * mm, y, money(tutar))
+        y -= 8 * mm
+
+    c.setStrokeColor(ink)
+    c.setLineWidth(1.2)
+    c.line(18 * mm, y + 5 * mm, W - 18 * mm, y + 5 * mm)
+    c.setLineWidth(1)
+    c.setFillColor(ink)
+    c.setFont(REPORT_FONT_BOLD, 11)
+    c.drawString(18 * mm, y, "TOPLAM")
+    c.setFont(REPORT_FONT, 9)
+    c.setFillColor(muted)
+    c.drawString(48 * mm, y, f"{row['active_kwh']:,.1f} kWh")
+    if priced:
+        c.setFillColor(ink)
+        c.setFont(REPORT_FONT_BOLD, 12)
+        c.drawRightString(W - 18 * mm, y, money(row["total_cost"]))
+    y -= 6 * mm
+
+    if not priced:
+        c.setFillColor(muted)
+        c.setFont(REPORT_FONT, 8.5)
+        c.drawString(18 * mm, y,
+                     "Tutarlar için panelden tarife bilgilerinizi girin; bu rapor tüketim kırılımını gösteriyor.")
+        y -= 6 * mm
+
+    # --- Gunluk tuketim grafigi ---
+    y -= 8 * mm
+    c.setFillColor(ink)
+    c.setFont(REPORT_FONT_BOLD, 12)
+    c.drawString(18 * mm, y, "Günlük Tüketim")
+    y -= 4 * mm
+
+    chart_h = 32 * mm
+    chart_w = W - 36 * mm
+    chart_bottom = y - chart_h
+    if daily:
+        peak = max(v for _, v in daily) or 1.0
+        bar_w = chart_w / max(len(daily), 1)
+        for i, (gun, val) in enumerate(daily):
+            h = (val / peak) * chart_h if peak > 0 else 0
+            c.setFillColor(colors.HexColor("#C97A2B"))
+            c.rect(18 * mm + i * bar_w + bar_w * 0.15, chart_bottom,
+                   bar_w * 0.7, max(h, 0.2), stroke=0, fill=1)
+        c.setStrokeColor(line)
+        c.line(18 * mm, chart_bottom, W - 18 * mm, chart_bottom)
+        c.setFillColor(muted)
+        c.setFont(REPORT_FONT, 7)
+        c.drawString(18 * mm, chart_bottom - 4 * mm, daily[0][0].strftime("%d.%m"))
+        c.drawRightString(W - 18 * mm, chart_bottom - 4 * mm, daily[-1][0].strftime("%d.%m"))
+        c.drawRightString(W - 18 * mm, chart_bottom + chart_h - 2 * mm, f"en yüksek {peak:,.1f} kWh")
+    else:
+        c.setFillColor(muted)
+        c.setFont(REPORT_FONT, 9)
+        c.drawString(18 * mm, chart_bottom + chart_h / 2, "Bu dönemde günlük tüketim verisi yok.")
+    y = chart_bottom - 12 * mm
+
+    # --- Oneriler ---
+    c.setFillColor(ink)
+    c.setFont(REPORT_FONT_BOLD, 12)
+    c.drawString(18 * mm, y, "Bu Dönemde Dikkat Edilmesi Gerekenler")
+    y -= 3 * mm
+
+    tip_style = ParagraphStyle(
+        "tip", fontName=REPORT_FONT, fontSize=9, leading=13, textColor=ink)
+    for tip in _report_recommendations(row, reactive, tariff):
+        para = Paragraph("• " + tip, tip_style)
+        _, ph = para.wrap(W - 40 * mm, 40 * mm)
+        y -= ph + 3 * mm
+        para.drawOn(c, 20 * mm, y)
+    y -= 8 * mm
+
+    # --- Alarm ozeti ---
+    c.setFillColor(ink)
+    c.setFont(REPORT_FONT_BOLD, 12)
+    c.drawString(18 * mm, y, "Alarm Özeti")
+    y -= 7 * mm
+    if alarms:
+        c.setFont(REPORT_FONT, 9)
+        for a in alarms:
+            if y < 20 * mm:
+                break
+            c.setFillColor(danger if a["open"] else muted)
+            c.drawString(20 * mm, y, ("● " if a["open"] else "○ ") + a["message"][:78])
+            c.setFillColor(muted)
+            c.drawRightString(W - 18 * mm, y, f"{a['count']} kez" + (" · sürüyor" if a["open"] else ""))
+            y -= 6 * mm
+    else:
+        c.setFillColor(accent)
+        c.setFont(REPORT_FONT, 9)
+        c.drawString(20 * mm, y, "Bu dönemde alarm oluşmadı.")
+        y -= 6 * mm
+
+    # --- Dipnot ---
+    c.setFillColor(muted)
+    c.setFont(REPORT_FONT, 7.5)
+    c.drawString(18 * mm, 12 * mm,
+                 "Tutarlar panelde girilen tarife bilgilerine göre hesaplanmış tahminlerdir; "
+                 "resmi fatura yerine geçmez.")
+    c.drawRightString(W - 18 * mm, 12 * mm, "Binary Enerji")
+
+    c.save()
+    return buf.getvalue()
+
+
+@app.get("/reports/monthly-pdf")
+def monthly_pdf(device_id: str, year: int | None = None, month: int | None = None,
+                user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if year is None or month is None:
+        year, month = _previous_month()
+    if not 1 <= month <= 12:
+        raise HTTPException(status_code=400, detail="Geçersiz ay")
+    if not 2020 <= year <= datetime.now(timezone.utc).year + 1:
+        raise HTTPException(status_code=400, detail="Geçersiz yıl")
+    try:
+        pdf = build_monthly_pdf(device_id, year, month)
+    except Exception as e:
+        logger.error("Aylik rapor uretilemedi (%s %s-%s): %s", device_id, year, month, e)
+        raise HTTPException(status_code=500, detail="Rapor oluşturulamadı")
+    filename = f"{device_id}-{year}-{month:02d}-enerji-raporu.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+class MonthlyReportPref(BaseModel):
+    enabled: bool
+
+
+@app.post("/me/monthly-report")
+def set_monthly_report_pref(payload: MonthlyReportPref, user: str = Depends(require_auth)):
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("UPDATE users SET monthly_report = %s WHERE username = %s", (payload.enabled, user))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Aylık rapor tercihi güncellendi", "enabled": payload.enabled}
+
+
+def send_monthly_reports(year: int | None = None, month: int | None = None) -> dict:
+    """Aylik raporlari uretip e-posta ile gonderir. Ayin 1'inde cron tetikler.
+
+    Kullanici basina TEK e-posta gonderiliyor, erisebildigi her cihaz icin bir
+    PDF ekiyle -- cihaz basina ayri e-posta cok cihazli musteride spam olurdu.
+    Erisim kapsami _ACCESSIBLE_DEVICES_SQL uzerinden cozuluyor; bu sorgu tum
+    sistemde tek yerde tanimli oldugu icin rapor kapsami ile panelde gorulen
+    kapsam ayrisamaz.
+    """
+    if year is None or month is None:
+        year, month = _previous_month()
+
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT username, email FROM users
+        WHERE monthly_report = true AND is_verified = true
+          AND email IS NOT NULL AND email <> ''
+    """)
+    recipients = cur.fetchall()
+
+    sent = 0
+    skipped = 0
+    failed = 0
+    for username, email in recipients:
+        cur.execute(_ACCESSIBLE_DEVICES_SQL, (username,))
+        devices = [(r[0], r[1]) for r in cur.fetchall()][:MONTHLY_REPORT_MAX_DEVICES]
+        if not devices:
+            skipped += 1
+            continue
+
+        attachments = []
+        names = []
+        for dev_id, dev_name in devices:
+            try:
+                pdf = build_monthly_pdf(dev_id, year, month)
+            except Exception as e:
+                logger.error("Aylik rapor uretilemedi (%s): %s", dev_id, e)
+                continue
+            attachments.append({
+                "filename": f"{dev_name}-{year}-{month:02d}.pdf".replace("/", "-"),
+                "content": base64.b64encode(pdf).decode(),
+            })
+            names.append(dev_name)
+
+        if not attachments:
+            skipped += 1
+            continue
+
+        donem = f"{TR_MONTHS[month - 1]} {year}"
+        baslik = names[0] if len(names) == 1 else f"{len(names)} cihaz"
+        try:
+            resend.Emails.send({
+                "from": RESEND_FROM,
+                "to": [email],
+                "subject": f"{donem} Enerji Raporu — {baslik}",
+                "html": (
+                    f"<p><b>{donem}</b> dönemine ait enerji raporunuz ekte.</p>"
+                    f"<p>Rapor şunları içeriyor: faturanın kalem kalem dökümü "
+                    f"(zaman dilimleri, güç aşımı, reaktif ceza), günlük tüketim grafiği, "
+                    f"bu dönemde dikkat edilmesi gerekenler ve alarm özeti.</p>"
+                    f"<p>Cihazlar: {', '.join(names)}</p>"
+                    f"<p><a href='{SITE_URL}'>Panoyu aç</a></p>"
+                    f"<p style='font-size:12px;color:#6B7A90'>Bu e-postayı almak istemiyorsanız "
+                    f"hesap sayfanızdan aylık raporu kapatabilirsiniz.</p>"
+                ),
+                "attachments": attachments,
+            })
+            sent += 1
+        except Exception as e:
+            logger.error("Aylik rapor e-postasi gonderilemedi (%s): %s", username, e)
+            failed += 1
+
+    cur.close()
+    conn.close()
+    result = {"year": year, "month": month, "sent": sent, "skipped": skipped, "failed": failed}
+    logger.info("Aylik rapor gonderimi: %s", result)
+    return result
+
+
+@app.post("/admin/monthly-reports")
+def trigger_monthly_reports(year: int | None = None, month: int | None = None,
+                            user: str = Depends(require_admin)):
+    return send_monthly_reports(year, month)
 
 # ---------- WebSocket: Canlı veri ----------
 connected_clients: list[tuple[WebSocket, str]] = []
