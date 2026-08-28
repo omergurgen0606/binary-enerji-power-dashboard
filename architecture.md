@@ -803,12 +803,27 @@ yönlendirmesi (`try_files ... /index.html`) dosyayı yutuyordu. Service worker 
 MIME tipiyle kaydolmaz. Asıl sebep dosyanın servis edilen dizinde hiç
 bulunmamasıydı; bkz. deploy uyarısı (bölüm 5 sonu).
 
+**Asıl tuzak — service worker yaşam döngüsü:** İlk testlerde push servisi HTTP
+201 dönüyor, `failure_count` 0 kalıyor, ama ekranda hiçbir şey görünmüyordu.
+Sebep: güncellenen bir service worker, eskisini kontrol eden **tüm sekmeler
+kapanana kadar** "bekliyor" durumunda kalır. Yani sunucu başarı raporlarken
+düzeltmeler kullanıcıya hiç ulaşmıyordu. `skipWaiting()` + `clients.claim()`
+eklendi: yeni sürüm bir sonraki gezinmede devralıyor. Alarm kanalı için bu şart —
+bildirim kodundaki bir hatanın kullanıcıya ulaşması, onun tüm sekmeleri
+kapatmasına bağlı olamaz.
+
+Teşhis, service worker'ın **içinden** gelen bir onay (ack) olmadan yapılamadı:
+push servisinden gelen 201, tarayıcının worker'ı gerçekten uyandırıp
+uyandırmadığı hakkında hiçbir şey söylemiyor. Geçici olarak eklenen iz,
+teslimatı ve yükün çözüldüğünü (`yuk_cozuldu=True`) kanıtladıktan sonra
+kaldırıldı — iskele koddu; üretimde kimlik doğrulamasız bir endpoint ve her
+bildirimde fazladan bir istek bırakmaya değmezdi.
+
 **Doğrulama:** Push servisi şifreli yükü ve VAPID imzasını kabul ediyor (kasten
 geçersiz token'a HTTP 410 dönmesi imzanın kabul edildiğini kanıtlıyor — reddedilse
 401/403 gelirdi); kapsam, cihaza erişimi olmayan kullanıcıyı dışarıda bırakıyor;
-410 temizliği aboneliği siliyor. Service worker canlı sitede `binaryenerji.com/`
-kapsamıyla kaydoluyor. **Gerçek bildirimin ekranda görünmesi kullanıcı testine
-bağlı** — başsız tarayıcıda bildirim izni verilemiyor.
+410 temizliği aboneliği siliyor. **Canlı sitede uçtan uca doğrulandı** (28 Ağustos
+2026): bildirim teslim edildi, çözüldü ve ekranda göründü.
 
 ---
 
