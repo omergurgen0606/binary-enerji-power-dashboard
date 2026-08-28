@@ -2027,6 +2027,59 @@ def evaluate_alarms(device_id: str, data: dict, cur):
             alarm_notify(device_id, "✅ Alarm normale döndü", f"{name} tekrar normal aralıkta.")
 
 
+# Cevrimdisi kademeleri (son veriden bu yana gecen dakika). Cihaz her kademeyi
+# gectiginde BIR bildirim gonderilir; sonuncudan sonra susulur. Sonsuza kadar
+# bildirim gondermek, bildirimlerin tamamen yok sayilmasiyla biter.
+OFFLINE_ESCALATION_MINUTES = [15, 60, 360, 720, 1440, 10080, 43200]
+
+
+def _offline_milestones(offline_minutes: int) -> list[int]:
+    """Bu kural icin bildirim gonderilecek dakika esikleri.
+
+    Ilk esik kuralin kendi `offline_minutes` degeri -- cihazi cevrimdisi
+    saymadan once beklenen sure. Bundan kucuk kademeler atlanir, esit olan
+    tekrarlanmaz: kural 15 dakikaysa "cevrimdisi oldu" ile "15 dakikadir
+    cevrimdisi" ayni andir ve iki kez bildirilmemelidir.
+    """
+    return sorted({offline_minutes} | {m for m in OFFLINE_ESCALATION_MINUTES if m > offline_minutes})
+
+
+def _offline_sure_metni(dakika: int) -> str:
+    if dakika < 60:
+        return f"{dakika} dakikadır"
+    if dakika < 1440:
+        saat = dakika // 60
+        return f"{saat} saattir"
+    if dakika < 10080:
+        return f"{dakika // 1440} gündür"
+    if dakika < 43200:
+        return f"{dakika // 10080} haftadır"
+    return f"{dakika // 43200} aydır"
+
+
+def _offline_karar(gecen_dk: int, offline_minutes: int, stage: int) -> dict:
+    """Kademe karari -- sonsuz dongunun disinda, test edilebilir olsun diye.
+
+    stage: bu cevrimdisi doneminde kac kademe bildirildi.
+    """
+    kademeler = _offline_milestones(offline_minutes)
+    gecilen = sum(1 for m in kademeler if gecen_dk >= m)
+    if gecilen == 0 or gecilen <= stage:
+        # gecilen <= stage: bu kademe zaten bildirildi. Son kademeden sonra da
+        # hep buraya dusulur -- "1 aydan sonra sus" davranisi buradan geliyor.
+        return {"bildir": False, "kademe": gecilen, "toplam": len(kademeler)}
+    return {
+        "bildir": True,
+        "kademe": gecilen,
+        "toplam": len(kademeler),
+        # Bildirim ZAMANINI kademe belirler, ama metin GERCEK gecen sureyi
+        # soyler. Kademe etiketi kullanilsaydi 5,7 saattir kapali bir cihaz
+        # icin "1 saattir" yazardi -- 360 dakika kademesi henuz gecilmedigi icin.
+        "sure": _offline_sure_metni(gecen_dk),
+        "son_mu": gecilen == len(kademeler),
+    }
+
+
 def alarm_offline_watchdog():
     """Cihazlarin veri gondermeyi kesip kesmedigini periyodik olarak kontrol eder."""
     while True:
@@ -2036,31 +2089,61 @@ def alarm_offline_watchdog():
             conn.autocommit = True
             cur = conn.cursor()
             cur.execute("""
-                SELECT r.id, r.device_id, r.offline_minutes, r.is_active,
+                SELECT r.id, r.device_id, r.offline_minutes, r.is_active, r.offline_stage,
+                       r.created_at,
                        (SELECT max(time) FROM measurements m WHERE m.device_id = r.device_id)
                 FROM alarm_rules r
                 WHERE r.enabled AND r.metric = 'offline'
             """)
-            for rule_id, device_id, minutes, is_active, last_seen in cur.fetchall():
-                stale = last_seen is None or (
-                    datetime.now(last_seen.tzinfo) - last_seen
-                ) > timedelta(minutes=minutes)
+            simdi = datetime.now(timezone.utc)
+            for rule_id, device_id, minutes, is_active, stage, created_at, last_seen in cur.fetchall():
+                # Cihaz hic veri gondermediyse kuralin olusturulma zamani referans
+                # alinir. Yoksa "son veri yok" sonsuz sure demek olur ve yeni
+                # eklenen bir cihaza aninda "1 aydir cevrimdisi" bildirimi gider.
+                referans = last_seen or created_at
+                gecen_dk = int((simdi - referans).total_seconds() // 60)
+                karar = _offline_karar(gecen_dk, minutes, stage)
+                gecilen = karar["kademe"]
 
-                if stale and not is_active:
-                    gecen = "hiç veri alınmadı" if last_seen is None else f"son veri: {last_seen:%d.%m.%Y %H:%M}"
-                    message = f"Cihaz {minutes} dakikadır veri göndermiyor ({gecen})"
-                    cur.execute("""
-                        INSERT INTO alarm_events (rule_id, device_id, message) VALUES (%s, %s, %s)
-                    """, (rule_id, device_id, message))
-                    cur.execute("UPDATE alarm_rules SET is_active = true, last_triggered_at = now() WHERE id = %s", (rule_id,))
-                    logger.info("ALARM (cevrimdisi) tetiklendi %s", device_id)
-                    alarm_notify(device_id, "🔴 Cihaz çevrimdışı", message)
+                if gecilen == 0:
+                    if is_active:
+                        cur.execute("UPDATE alarm_events SET resolved_at = now() "
+                                    "WHERE rule_id = %s AND resolved_at IS NULL", (rule_id,))
+                        cur.execute("UPDATE alarm_rules SET is_active = false, offline_stage = 0 "
+                                    "WHERE id = %s", (rule_id,))
+                        logger.info("ALARM (cevrimdisi) cozuldu %s", device_id)
+                        alarm_notify(device_id, "✅ Cihaz tekrar çevrimiçi",
+                                     "Cihaz yeniden veri göndermeye başladı.")
+                    continue
 
-                elif not stale and is_active:
-                    cur.execute("UPDATE alarm_events SET resolved_at = now() WHERE rule_id = %s AND resolved_at IS NULL", (rule_id,))
-                    cur.execute("UPDATE alarm_rules SET is_active = false WHERE id = %s", (rule_id,))
-                    logger.info("ALARM (cevrimdisi) cozuldu %s", device_id)
-                    alarm_notify(device_id, "✅ Cihaz tekrar çevrimiçi", "Cihaz yeniden veri göndermeye başladı.")
+                if not karar["bildir"]:
+                    continue
+
+                sure = karar["sure"]
+                gecmis = "hiç veri alınmadı" if last_seen is None else f"son veri: {last_seen:%d.%m.%Y %H:%M}"
+                message = f"Cihaz {sure} veri göndermiyor ({gecmis})"
+
+                # Kademeler yeni kayit ACMAZ: tek bir cevrimdisi donemi panelde tek
+                # aktif alarm olarak gorunmeli, rozet 7 gostermemeli. Karar
+                # `stage`e degil ACIK KAYDIN VARLIGINA bakiyor -- stage 0 olup da
+                # acik kayit bulunan bir durum gercekten yasandi (goc sonrasi:
+                # is_active=true, offline_stage=0) ve ikinci bir kayit acilmisti.
+                cur.execute("UPDATE alarm_events SET message = %s "
+                            "WHERE rule_id = %s AND resolved_at IS NULL", (message, rule_id))
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO alarm_events (rule_id, device_id, message) "
+                                "VALUES (%s, %s, %s)", (rule_id, device_id, message))
+
+                cur.execute("UPDATE alarm_rules SET is_active = true, offline_stage = %s, "
+                            "last_triggered_at = now() WHERE id = %s", (gecilen, rule_id))
+
+                son_mu = karar["son_mu"]
+                logger.info("ALARM (cevrimdisi) kademe %s/%s %s", gecilen, karar["toplam"], device_id)
+                alarm_notify(
+                    device_id, "🔴 Cihaz çevrimdışı",
+                    message + ("\n\nBu son hatırlatma — bu cihaz için yeniden çevrimiçi "
+                               "olana kadar başka bildirim gönderilmeyecek." if son_mu else ""),
+                )
 
             invalidate_alarm_cache()
             cur.close()

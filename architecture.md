@@ -546,6 +546,23 @@ Bölüm 5.7'nin devamı — yukarıdaki "flaşlanıp test edilmedi" notu artık 
 | Google Sheets'e yazarken `PermissionError: PermissionError()` (mesaj boş) | Yanıltıcı bir hata — dosya izin sorunu değil (`cat` ile container içinden dosya okunabiliyordu, sahiplik/mod doğruydu). Gerçek sebep: Google Cloud projesinde **"Google Sheets API" etkinleştirilmemişti** — Sheets API'nin döndürdüğü `403 Forbidden`'ı `gspread` kütüphanesi Python'un yerleşik `PermissionError`'ına çeviriyor. "APIs & Services" → "Enable APIs and services" → "Google Sheets API" ile etkinleştirilince düzeldi. (Not: Sheet'in servis hesabıyla paylaşılmış olması **yetmiyor**, API'nin proje genelinde de etkin olması gerekiyor.) |
 | Resend domain doğrulaması "DNS invalid" — SPF (MX+TXT) sürekli başarısız | hosting.com.tr DNS panelinde `send` MX kaydının **Değer** alanına girilen `feedback-smtp.ap-northeast-1.amazonses.com` değerinin sonuna panel otomatik olarak `.binaryenerji.com. send` gibi fazladan metin ekliyordu (kayıt silinip aynı şekilde yeniden eklense bile tekrarlanan bir panel davranışı). Değerin sonuna elle bir nokta (`.`) eklenerek (`feedback-smtp.ap-northeast-1.amazonses.com.`, standart DNS "tam adres" gösterimi) panelin otomatik tamamlama mantığı devre dışı bırakıldı, kayıt doğru kaydedildi |
 
+## 8.5. Çevrimdışı Alarmı — Kademeli Bildirim
+
+Önceden tek bildirim vardı: cihaz çevrimdışı olunca bir kez, sonra sessizlik. Bir cihazın on beş dakika kapalı kalmasıyla üç gün kapalı kalması arasında hiçbir fark hissedilmiyordu.
+
+**Kademeler** (son veriden bu yana): kuralın kendi eşiği → 15 dk → 1 saat → 6 saat → 12 saat → 1 gün → 1 hafta → 1 ay → **sonra susulur**. Sonsuza kadar bildirim göndermek, bildirimlerin tamamen yok sayılmasıyla biter.
+
+Tasarım kararları — her biri gerçek bir hatayı önlüyor:
+
+- **Kademeler yeni alarm kaydı AÇMAZ.** Açsaydı tek bir çevrimdışı cihaz panelde "7 aktif alarm" gösterirdi ve sekme rozeti anlamsızlaşırdı. Tek dönem = tek kayıt; kademeler o kaydın mesajını günceller.
+- Karar `offline_stage` sayacına değil **açık kaydın varlığına** bakar. Göç sonrası `is_active=true, offline_stage=0` durumu gerçekten yaşandı ve ikinci bir kayıt açılmasına yol açtı; `UPDATE ... rowcount == 0 → INSERT` deseni buna kapalı.
+- **Bildirim zamanını kademe belirler, metni gerçek geçen süre söyler.** Kademe etiketi kullanılsaydı 5,7 saattir kapalı bir cihaz için mesaj "1 saattir" derdi — 360 dakika kademesi henüz geçilmediği için.
+- **Atlanan kademeler tek bildirim üretir.** Sunucu bir gün kapalı kalıp açılırsa altı bildirim birden gitmez; ulaşılan en yüksek kademe için bir tane çıkar.
+- **Hiç veri göndermemiş cihazda kuralın `created_at`'i referans alınır.** Yoksa süre sonsuz olur ve yeni eklenen bir cihaza anında "1 aydır çevrimdışı" gider.
+- Eşikle çakışan kademe tekrarlanmaz: kural 15 dakikaysa "çevrimdışı oldu" ile "15 dakikadır" aynı andır, iki bildirim çıkmaz. **Sekiz kademenin tamamı için kuralın eşiği 15'ten küçük olmalı** (ör. 2 dakika).
+
+`tests/test_cevrimdisi_kademeleri.py` bunların hepsini doğruluyor; karar mantığı sonsuz döngüden `_offline_karar()` olarak ayrıldı ki test edilebilsin.
+
 ## 9. Dağıtım ve Staging Ortamı
 
 **Neden var:** 28 Ağustos 2026'da bağlantı havuzu hatası doğrudan üretime gitti ve 22 yazma uç noktası sessizce yazdıklarını atmaya başladı (bkz. bölüm 8). Hata yalnızca gerçek bir çalışan süreçte görünüyordu — birim testi değil, çalışan bir ortam gerekiyordu.

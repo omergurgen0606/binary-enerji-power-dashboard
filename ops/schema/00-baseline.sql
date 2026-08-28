@@ -1,32 +1,8 @@
--- =====================================================================
--- Binary Enerji — TAM ŞEMA TEMELİ (baseline)
---
--- Bu dosya, üretimdeki public şemasının `pg_dump --schema-only` çıktısıdır.
--- Şimdiye kadar tablolar tek tek elle oluşturuldu ve şemanın bütününün
--- tanımlı olduğu tek bir yer yoktu: sunucu kaybolsaydı yeniden kurmanın tek
--- yolu bir yedeği geri yüklemekti.
---
--- İki yerde kullanılıyor:
---   1. Test veritabanı kurulumu (tests/)
---   2. Felaket senaryosunda sıfırdan kurulum
---
--- TIMESCALEDB'YE ÖZEL KISIMLAR BURADA YOK. Hypertable dönüşümleri, sürekli
--- toplamalar (device_energy_hourly, measurements_10min, measurements_15min),
--- sıkıştırma ve saklama politikaları ops/schema/ altındaki tarihli göç
--- dosyalarında. Sıfırdan kurulumda önce bu dosya, sonra o göçler uygulanmalı.
---
--- Yeniden üretmek için:
---   ssh binaryenerji "docker exec \$(docker ps -qf name=timescaledb) \
---     pg_dump -U postgres --schema-only --no-owner --no-privileges \
---     --schema=public postgres"
---   (çıktıdan CREATE VIEW ile başlayan 3 sürekli toplama bloğu çıkarılır)
--- =====================================================================
-
 --
 -- PostgreSQL database dump
 --
 
-\restrict ORZpet7MrYcgP1vAoMvkjVvYfWFwgazar84vxLKAIPq2RYeG6FhbWp1edX0CwHm
+\restrict UAYAPYzOKzqHFE7NIDHeVcrd8MnvfvGT5WyZnxtU6W3KT6lLsupKBVGWxXeCdty
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -43,18 +19,17 @@ SET client_min_messages = warning;
 SET row_security = off;
 
 --
--- Name: public; Type: SCHEMA; Schema: -; Owner: -
+-- Name: timescaledb; Type: EXTENSION; Schema: -; Owner: -
 --
 
--- 'CREATE SCHEMA public' cikarildi: yeni veritabaninda zaten mevcut.
--- CREATE SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS timescaledb WITH SCHEMA public;
 
 
 --
--- Name: SCHEMA public; Type: COMMENT; Schema: -; Owner: -
+-- Name: EXTENSION timescaledb; Type: COMMENT; Schema: -; Owner: -
 --
 
-COMMENT ON SCHEMA public IS 'standard public schema';
+COMMENT ON EXTENSION timescaledb IS 'Enables scalable inserts and complex queries for time-series data (Community Edition)';
 
 
 SET default_tablespace = '';
@@ -75,6 +50,36 @@ CREATE TABLE public.device_energy (
     inductive_varh_uretim bigint,
     capacitive_varh_uretim bigint
 );
+
+
+--
+-- Name: _direct_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE VIEW _timescaledb_internal._direct_view_10 AS
+ SELECT device_id,
+    public.time_bucket('01:00:00'::interval, "time") AS bucket,
+    public.last("time", "time") AS reading_time,
+    public.first(active_wh_tuketim, "time") AS first_active_tuketim,
+    public.last(active_wh_tuketim, "time") AS active_wh_tuketim,
+    max(active_wh_tuketim) AS max_active_tuketim,
+    public.first(inductive_varh_tuketim, "time") AS first_inductive_tuketim,
+    public.last(inductive_varh_tuketim, "time") AS inductive_varh_tuketim,
+    max(inductive_varh_tuketim) AS max_inductive_tuketim,
+    public.first(capacitive_varh_tuketim, "time") AS first_capacitive_tuketim,
+    public.last(capacitive_varh_tuketim, "time") AS capacitive_varh_tuketim,
+    max(capacitive_varh_tuketim) AS max_capacitive_tuketim,
+    public.first(active_wh_uretim, "time") AS first_active_uretim,
+    public.last(active_wh_uretim, "time") AS active_wh_uretim,
+    max(active_wh_uretim) AS max_active_uretim,
+    public.first(inductive_varh_uretim, "time") AS first_inductive_uretim,
+    public.last(inductive_varh_uretim, "time") AS inductive_varh_uretim,
+    max(inductive_varh_uretim) AS max_inductive_uretim,
+    public.first(capacitive_varh_uretim, "time") AS first_capacitive_uretim,
+    public.last(capacitive_varh_uretim, "time") AS capacitive_varh_uretim,
+    max(capacitive_varh_uretim) AS max_capacitive_uretim
+   FROM public.device_energy
+  GROUP BY device_id, (public.time_bucket('01:00:00'::interval, "time"));
 
 
 --
@@ -123,6 +128,476 @@ CREATE TABLE public.measurements (
 
 
 --
+-- Name: _direct_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE VIEW _timescaledb_internal._direct_view_11 AS
+ SELECT device_id,
+    public.time_bucket('00:10:00'::interval, "time") AS bucket,
+    count(*) AS sample_count,
+    avg(v1) AS avg_v1,
+    min(v1) AS min_v1,
+    max(v1) AS max_v1,
+    avg(v2) AS avg_v2,
+    min(v2) AS min_v2,
+    max(v2) AS max_v2,
+    avg(v3) AS avg_v3,
+    min(v3) AS min_v3,
+    max(v3) AS max_v3,
+    avg(f1) AS avg_f,
+    min(f1) AS min_f,
+    max(f1) AS max_f,
+    avg(thvd1) AS avg_thvd1,
+    max(thvd1) AS max_thvd1,
+    avg(thvd2) AS avg_thvd2,
+    max(thvd2) AS max_thvd2,
+    avg(thvd3) AS avg_thvd3,
+    max(thvd3) AS max_thvd3
+   FROM public.measurements
+  GROUP BY device_id, (public.time_bucket('00:10:00'::interval, "time"));
+
+
+--
+-- Name: _direct_view_9; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE VIEW _timescaledb_internal._direct_view_9 AS
+ SELECT device_id,
+    public.time_bucket('00:15:00'::interval, "time") AS bucket,
+    count(*) AS sample_count,
+    avg(((COALESCE(p1, (0)::double precision) + COALESCE(p2, (0)::double precision)) + COALESCE(p3, (0)::double precision))) AS avg_total_p,
+    max(((COALESCE(p1, (0)::double precision) + COALESCE(p2, (0)::double precision)) + COALESCE(p3, (0)::double precision))) AS max_total_p,
+    avg(((COALESCE(q1, (0)::double precision) + COALESCE(q2, (0)::double precision)) + COALESCE(q3, (0)::double precision))) AS avg_total_q,
+    avg(((COALESCE(s1, (0)::double precision) + COALESCE(s2, (0)::double precision)) + COALESCE(s3, (0)::double precision))) AS avg_total_s,
+    avg(v1) AS avg_v1,
+    min(v1) AS min_v1,
+    max(v1) AS max_v1,
+    avg(v2) AS avg_v2,
+    min(v2) AS min_v2,
+    max(v2) AS max_v2,
+    avg(v3) AS avg_v3,
+    min(v3) AS min_v3,
+    max(v3) AS max_v3,
+    avg(i1) AS avg_i1,
+    max(i1) AS max_i1,
+    avg(i2) AS avg_i2,
+    max(i2) AS max_i2,
+    avg(i3) AS avg_i3,
+    max(i3) AS max_i3,
+    avg(i_neutral) AS avg_i_neutral,
+    max(i_neutral) AS max_i_neutral,
+    avg(f1) AS avg_f,
+    min(f1) AS min_f,
+    max(f1) AS max_f,
+    avg(pf1) AS avg_pf1,
+    avg(pf2) AS avg_pf2,
+    avg(pf3) AS avg_pf3,
+    avg(thd1) AS avg_thd1,
+    max(thd1) AS max_thd1,
+    avg(thd2) AS avg_thd2,
+    max(thd2) AS max_thd2,
+    avg(thd3) AS avg_thd3,
+    max(thd3) AS max_thd3,
+    avg(thvd1) AS avg_thvd1,
+    max(thvd1) AS max_thvd1,
+    avg(thvd2) AS avg_thvd2,
+    max(thvd2) AS max_thvd2,
+    avg(thvd3) AS avg_thvd3,
+    max(thvd3) AS max_thvd3
+   FROM public.measurements
+  GROUP BY device_id, (public.time_bucket('00:15:00'::interval, "time"));
+
+
+--
+-- Name: _materialized_hypertable_10; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._materialized_hypertable_10 (
+    device_id text,
+    bucket timestamp with time zone NOT NULL,
+    reading_time timestamp with time zone,
+    first_active_tuketim bigint,
+    active_wh_tuketim bigint,
+    max_active_tuketim bigint,
+    first_inductive_tuketim bigint,
+    inductive_varh_tuketim bigint,
+    max_inductive_tuketim bigint,
+    first_capacitive_tuketim bigint,
+    capacitive_varh_tuketim bigint,
+    max_capacitive_tuketim bigint,
+    first_active_uretim bigint,
+    active_wh_uretim bigint,
+    max_active_uretim bigint,
+    first_inductive_uretim bigint,
+    inductive_varh_uretim bigint,
+    max_inductive_uretim bigint,
+    first_capacitive_uretim bigint,
+    capacitive_varh_uretim bigint,
+    max_capacitive_uretim bigint
+);
+
+
+--
+-- Name: _hyper_10_14_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_10_14_chunk (
+    CONSTRAINT constraint_14 CHECK (((bucket >= '2026-07-16 00:00:00+00'::timestamp with time zone) AND (bucket < '2026-09-24 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (_timescaledb_internal._materialized_hypertable_10);
+
+
+--
+-- Name: _materialized_hypertable_11; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._materialized_hypertable_11 (
+    device_id text,
+    bucket timestamp with time zone NOT NULL,
+    sample_count bigint,
+    avg_v1 double precision,
+    min_v1 double precision,
+    max_v1 double precision,
+    avg_v2 double precision,
+    min_v2 double precision,
+    max_v2 double precision,
+    avg_v3 double precision,
+    min_v3 double precision,
+    max_v3 double precision,
+    avg_f double precision,
+    min_f double precision,
+    max_f double precision,
+    avg_thvd1 double precision,
+    max_thvd1 double precision,
+    avg_thvd2 double precision,
+    max_thvd2 double precision,
+    avg_thvd3 double precision,
+    max_thvd3 double precision
+);
+
+
+--
+-- Name: _hyper_11_21_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_11_21_chunk (
+    CONSTRAINT constraint_21 CHECK (((bucket >= '2026-08-25 00:00:00+00'::timestamp with time zone) AND (bucket < '2026-09-04 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (_timescaledb_internal._materialized_hypertable_11);
+
+
+--
+-- Name: _hyper_11_22_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_11_22_chunk (
+    CONSTRAINT constraint_22 CHECK (((bucket >= '2026-08-15 00:00:00+00'::timestamp with time zone) AND (bucket < '2026-08-25 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (_timescaledb_internal._materialized_hypertable_11);
+
+
+--
+-- Name: _hyper_11_23_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_11_23_chunk (
+    CONSTRAINT constraint_23 CHECK (((bucket >= '2026-08-05 00:00:00+00'::timestamp with time zone) AND (bucket < '2026-08-15 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (_timescaledb_internal._materialized_hypertable_11);
+
+
+--
+-- Name: _hyper_1_15_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_15_chunk (
+    CONSTRAINT constraint_15 CHECK ((("time" >= '2026-08-28 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-29 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.measurements);
+
+
+--
+-- Name: _hyper_1_1_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_1_chunk (
+    CONSTRAINT constraint_1 CHECK ((("time" >= '2026-08-06 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-13 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.measurements);
+
+
+--
+-- Name: _hyper_1_1_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_1_chunk_compressed (
+    _ts_meta_count integer,
+    device_id text,
+    _ts_meta_min_1 timestamp with time zone,
+    _ts_meta_max_1 timestamp with time zone,
+    _ts_meta_v2_first_time timestamp with time zone,
+    _ts_meta_v2_last_time timestamp with time zone,
+    "time" _timescaledb_internal.compressed_data,
+    v1 _timescaledb_internal.compressed_data,
+    i1 _timescaledb_internal.compressed_data,
+    p1 _timescaledb_internal.compressed_data,
+    f1 _timescaledb_internal.compressed_data,
+    v2 _timescaledb_internal.compressed_data,
+    i2 _timescaledb_internal.compressed_data,
+    p2 _timescaledb_internal.compressed_data,
+    v3 _timescaledb_internal.compressed_data,
+    i3 _timescaledb_internal.compressed_data,
+    p3 _timescaledb_internal.compressed_data,
+    vl12 _timescaledb_internal.compressed_data,
+    vl23 _timescaledb_internal.compressed_data,
+    vl31 _timescaledb_internal.compressed_data,
+    q1 _timescaledb_internal.compressed_data,
+    q2 _timescaledb_internal.compressed_data,
+    q3 _timescaledb_internal.compressed_data,
+    s1 _timescaledb_internal.compressed_data,
+    s2 _timescaledb_internal.compressed_data,
+    s3 _timescaledb_internal.compressed_data,
+    f2 _timescaledb_internal.compressed_data,
+    f3 _timescaledb_internal.compressed_data,
+    v_neutral _timescaledb_internal.compressed_data,
+    i_neutral _timescaledb_internal.compressed_data,
+    cos1 _timescaledb_internal.compressed_data,
+    cos2 _timescaledb_internal.compressed_data,
+    cos3 _timescaledb_internal.compressed_data,
+    pf1 _timescaledb_internal.compressed_data,
+    pf2 _timescaledb_internal.compressed_data,
+    pf3 _timescaledb_internal.compressed_data,
+    thd1 _timescaledb_internal.compressed_data,
+    thd2 _timescaledb_internal.compressed_data,
+    thd3 _timescaledb_internal.compressed_data,
+    thvd1 _timescaledb_internal.compressed_data,
+    thvd2 _timescaledb_internal.compressed_data,
+    thvd3 _timescaledb_internal.compressed_data
+)
+WITH (toast_tuple_target='128');
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN _ts_meta_count SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN device_id SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN _ts_meta_min_1 SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN _ts_meta_max_1 SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN _ts_meta_v2_first_time SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN _ts_meta_v2_last_time SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN "time" SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN v1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN i1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN p1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN f1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN v2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN i2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN p2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN v3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN i3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN p3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN vl12 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN vl23 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN vl31 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN q1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN q2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN q3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN s1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN s2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN s3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN f2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN f3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN v_neutral SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN i_neutral SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN cos1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN cos2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN cos3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN pf1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN pf2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN pf3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thd1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thd2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thd3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thvd1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thvd2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thvd3 SET STATISTICS 0;
+
+
+--
+-- Name: _hyper_1_2_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_2_chunk (
+    CONSTRAINT constraint_2 CHECK ((("time" >= '2026-08-13 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-20 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.measurements);
+
+
+--
+-- Name: _hyper_1_2_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_2_chunk_compressed (
+    _ts_meta_count integer,
+    device_id text,
+    _ts_meta_min_1 timestamp with time zone,
+    _ts_meta_max_1 timestamp with time zone,
+    _ts_meta_v2_first_time timestamp with time zone,
+    _ts_meta_v2_last_time timestamp with time zone,
+    "time" _timescaledb_internal.compressed_data,
+    v1 _timescaledb_internal.compressed_data,
+    i1 _timescaledb_internal.compressed_data,
+    p1 _timescaledb_internal.compressed_data,
+    f1 _timescaledb_internal.compressed_data,
+    v2 _timescaledb_internal.compressed_data,
+    i2 _timescaledb_internal.compressed_data,
+    p2 _timescaledb_internal.compressed_data,
+    v3 _timescaledb_internal.compressed_data,
+    i3 _timescaledb_internal.compressed_data,
+    p3 _timescaledb_internal.compressed_data,
+    vl12 _timescaledb_internal.compressed_data,
+    vl23 _timescaledb_internal.compressed_data,
+    vl31 _timescaledb_internal.compressed_data,
+    q1 _timescaledb_internal.compressed_data,
+    q2 _timescaledb_internal.compressed_data,
+    q3 _timescaledb_internal.compressed_data,
+    s1 _timescaledb_internal.compressed_data,
+    s2 _timescaledb_internal.compressed_data,
+    s3 _timescaledb_internal.compressed_data,
+    f2 _timescaledb_internal.compressed_data,
+    f3 _timescaledb_internal.compressed_data,
+    v_neutral _timescaledb_internal.compressed_data,
+    i_neutral _timescaledb_internal.compressed_data,
+    cos1 _timescaledb_internal.compressed_data,
+    cos2 _timescaledb_internal.compressed_data,
+    cos3 _timescaledb_internal.compressed_data,
+    pf1 _timescaledb_internal.compressed_data,
+    pf2 _timescaledb_internal.compressed_data,
+    pf3 _timescaledb_internal.compressed_data,
+    thd1 _timescaledb_internal.compressed_data,
+    thd2 _timescaledb_internal.compressed_data,
+    thd3 _timescaledb_internal.compressed_data,
+    thvd1 _timescaledb_internal.compressed_data,
+    thvd2 _timescaledb_internal.compressed_data,
+    thvd3 _timescaledb_internal.compressed_data
+)
+WITH (toast_tuple_target='128');
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN _ts_meta_count SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN device_id SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN _ts_meta_min_1 SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN _ts_meta_max_1 SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN _ts_meta_v2_first_time SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN _ts_meta_v2_last_time SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN "time" SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN v1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN i1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN p1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN f1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN v2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN i2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN p2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN v3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN i3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN p3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN vl12 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN vl23 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN vl31 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN q1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN q2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN q3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN s1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN s2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN s3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN f2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN f3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN v_neutral SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN i_neutral SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN cos1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN cos2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN cos3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN pf1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN pf2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN pf3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN thd1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN thd2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN thd3 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN thvd1 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN thvd2 SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN thvd3 SET STATISTICS 0;
+
+
+--
+-- Name: _hyper_1_5_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_5_chunk (
+    CONSTRAINT constraint_5 CHECK ((("time" >= '2026-08-20 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-27 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.measurements);
+
+
+--
+-- Name: _hyper_3_16_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_3_16_chunk (
+    CONSTRAINT constraint_16 CHECK ((("time" >= '2026-08-27 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-09-03 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_energy);
+
+
+--
+-- Name: _hyper_3_3_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_3_3_chunk (
+    CONSTRAINT constraint_3 CHECK ((("time" >= '2026-08-13 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-20 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_energy);
+
+
+--
+-- Name: _hyper_3_3_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_3_3_chunk_compressed (
+    _ts_meta_count integer,
+    device_id text,
+    _ts_meta_min_1 timestamp with time zone,
+    _ts_meta_max_1 timestamp with time zone,
+    _ts_meta_v2_first_time timestamp with time zone,
+    _ts_meta_v2_last_time timestamp with time zone,
+    "time" _timescaledb_internal.compressed_data,
+    active_wh_tuketim _timescaledb_internal.compressed_data,
+    inductive_varh_tuketim _timescaledb_internal.compressed_data,
+    capacitive_varh_tuketim _timescaledb_internal.compressed_data,
+    active_wh_uretim _timescaledb_internal.compressed_data,
+    inductive_varh_uretim _timescaledb_internal.compressed_data,
+    capacitive_varh_uretim _timescaledb_internal.compressed_data
+)
+WITH (toast_tuple_target='128');
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN _ts_meta_count SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN device_id SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN _ts_meta_min_1 SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN _ts_meta_max_1 SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN _ts_meta_v2_first_time SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN _ts_meta_v2_last_time SET STATISTICS 1000;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN "time" SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN active_wh_tuketim SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN inductive_varh_tuketim SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN capacitive_varh_tuketim SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN active_wh_uretim SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN inductive_varh_uretim SET STATISTICS 0;
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN capacitive_varh_uretim SET STATISTICS 0;
+
+
+--
+-- Name: _hyper_3_4_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_3_4_chunk (
+    CONSTRAINT constraint_4 CHECK ((("time" >= '2026-08-20 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-27 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_energy);
+
+
+--
 -- Name: device_stats; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -155,6 +630,26 @@ CREATE TABLE public.device_stats (
     avg_thid double precision,
     avg_thvd double precision
 );
+
+
+--
+-- Name: _hyper_4_17_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_4_17_chunk (
+    CONSTRAINT constraint_17 CHECK ((("time" >= '2026-08-27 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-09-03 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_stats);
+
+
+--
+-- Name: _hyper_4_6_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_4_6_chunk (
+    CONSTRAINT constraint_6 CHECK ((("time" >= '2026-08-20 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-27 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_stats);
 
 
 --
@@ -227,6 +722,26 @@ CREATE TABLE public.device_peaks (
 
 
 --
+-- Name: _hyper_5_18_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_5_18_chunk (
+    CONSTRAINT constraint_18 CHECK ((("time" >= '2026-08-27 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-09-03 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_peaks);
+
+
+--
+-- Name: _hyper_5_7_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_5_7_chunk (
+    CONSTRAINT constraint_7 CHECK ((("time" >= '2026-08-20 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-27 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_peaks);
+
+
+--
 -- Name: device_demand; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -277,6 +792,26 @@ CREATE TABLE public.device_demand (
     min_dthid2 double precision,
     min_dthid3 double precision
 );
+
+
+--
+-- Name: _hyper_6_19_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_6_19_chunk (
+    CONSTRAINT constraint_19 CHECK ((("time" >= '2026-08-27 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-09-03 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_demand);
+
+
+--
+-- Name: _hyper_6_8_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_6_8_chunk (
+    CONSTRAINT constraint_8 CHECK ((("time" >= '2026-08-20 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-27 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_demand);
 
 
 --
@@ -339,6 +874,217 @@ CREATE TABLE public.device_harmonics (
 
 
 --
+-- Name: _hyper_7_20_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_7_20_chunk (
+    CONSTRAINT constraint_20 CHECK ((("time" >= '2026-08-27 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-09-03 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_harmonics);
+
+
+--
+-- Name: _hyper_7_9_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_7_9_chunk (
+    CONSTRAINT constraint_9 CHECK ((("time" >= '2026-08-20 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-08-27 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.device_harmonics);
+
+
+--
+-- Name: _materialized_hypertable_9; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._materialized_hypertable_9 (
+    device_id text,
+    bucket timestamp with time zone NOT NULL,
+    sample_count bigint,
+    avg_total_p double precision,
+    max_total_p double precision,
+    avg_total_q double precision,
+    avg_total_s double precision,
+    avg_v1 double precision,
+    min_v1 double precision,
+    max_v1 double precision,
+    avg_v2 double precision,
+    min_v2 double precision,
+    max_v2 double precision,
+    avg_v3 double precision,
+    min_v3 double precision,
+    max_v3 double precision,
+    avg_i1 double precision,
+    max_i1 double precision,
+    avg_i2 double precision,
+    max_i2 double precision,
+    avg_i3 double precision,
+    max_i3 double precision,
+    avg_i_neutral double precision,
+    max_i_neutral double precision,
+    avg_f double precision,
+    min_f double precision,
+    max_f double precision,
+    avg_pf1 double precision,
+    avg_pf2 double precision,
+    avg_pf3 double precision,
+    avg_thd1 double precision,
+    max_thd1 double precision,
+    avg_thd2 double precision,
+    max_thd2 double precision,
+    avg_thd3 double precision,
+    max_thd3 double precision,
+    avg_thvd1 double precision,
+    max_thvd1 double precision,
+    avg_thvd2 double precision,
+    max_thvd2 double precision,
+    avg_thvd3 double precision,
+    max_thvd3 double precision
+);
+
+
+--
+-- Name: _hyper_9_11_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_9_11_chunk (
+    CONSTRAINT constraint_11 CHECK (((bucket >= '2026-08-25 00:00:00+00'::timestamp with time zone) AND (bucket < '2026-09-04 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (_timescaledb_internal._materialized_hypertable_9);
+
+
+--
+-- Name: _hyper_9_12_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_9_12_chunk (
+    CONSTRAINT constraint_12 CHECK (((bucket >= '2026-08-15 00:00:00+00'::timestamp with time zone) AND (bucket < '2026-08-25 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (_timescaledb_internal._materialized_hypertable_9);
+
+
+--
+-- Name: _hyper_9_13_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_9_13_chunk (
+    CONSTRAINT constraint_13 CHECK (((bucket >= '2026-08-05 00:00:00+00'::timestamp with time zone) AND (bucket < '2026-08-15 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (_timescaledb_internal._materialized_hypertable_9);
+
+
+--
+-- Name: _partial_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE VIEW _timescaledb_internal._partial_view_10 AS
+ SELECT device_id,
+    public.time_bucket('01:00:00'::interval, "time") AS bucket,
+    public.last("time", "time") AS reading_time,
+    public.first(active_wh_tuketim, "time") AS first_active_tuketim,
+    public.last(active_wh_tuketim, "time") AS active_wh_tuketim,
+    max(active_wh_tuketim) AS max_active_tuketim,
+    public.first(inductive_varh_tuketim, "time") AS first_inductive_tuketim,
+    public.last(inductive_varh_tuketim, "time") AS inductive_varh_tuketim,
+    max(inductive_varh_tuketim) AS max_inductive_tuketim,
+    public.first(capacitive_varh_tuketim, "time") AS first_capacitive_tuketim,
+    public.last(capacitive_varh_tuketim, "time") AS capacitive_varh_tuketim,
+    max(capacitive_varh_tuketim) AS max_capacitive_tuketim,
+    public.first(active_wh_uretim, "time") AS first_active_uretim,
+    public.last(active_wh_uretim, "time") AS active_wh_uretim,
+    max(active_wh_uretim) AS max_active_uretim,
+    public.first(inductive_varh_uretim, "time") AS first_inductive_uretim,
+    public.last(inductive_varh_uretim, "time") AS inductive_varh_uretim,
+    max(inductive_varh_uretim) AS max_inductive_uretim,
+    public.first(capacitive_varh_uretim, "time") AS first_capacitive_uretim,
+    public.last(capacitive_varh_uretim, "time") AS capacitive_varh_uretim,
+    max(capacitive_varh_uretim) AS max_capacitive_uretim
+   FROM public.device_energy
+  GROUP BY device_id, (public.time_bucket('01:00:00'::interval, "time"));
+
+
+--
+-- Name: _partial_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE VIEW _timescaledb_internal._partial_view_11 AS
+ SELECT device_id,
+    public.time_bucket('00:10:00'::interval, "time") AS bucket,
+    count(*) AS sample_count,
+    avg(v1) AS avg_v1,
+    min(v1) AS min_v1,
+    max(v1) AS max_v1,
+    avg(v2) AS avg_v2,
+    min(v2) AS min_v2,
+    max(v2) AS max_v2,
+    avg(v3) AS avg_v3,
+    min(v3) AS min_v3,
+    max(v3) AS max_v3,
+    avg(f1) AS avg_f,
+    min(f1) AS min_f,
+    max(f1) AS max_f,
+    avg(thvd1) AS avg_thvd1,
+    max(thvd1) AS max_thvd1,
+    avg(thvd2) AS avg_thvd2,
+    max(thvd2) AS max_thvd2,
+    avg(thvd3) AS avg_thvd3,
+    max(thvd3) AS max_thvd3
+   FROM public.measurements
+  GROUP BY device_id, (public.time_bucket('00:10:00'::interval, "time"));
+
+
+--
+-- Name: _partial_view_9; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE VIEW _timescaledb_internal._partial_view_9 AS
+ SELECT device_id,
+    public.time_bucket('00:15:00'::interval, "time") AS bucket,
+    count(*) AS sample_count,
+    avg(((COALESCE(p1, (0)::double precision) + COALESCE(p2, (0)::double precision)) + COALESCE(p3, (0)::double precision))) AS avg_total_p,
+    max(((COALESCE(p1, (0)::double precision) + COALESCE(p2, (0)::double precision)) + COALESCE(p3, (0)::double precision))) AS max_total_p,
+    avg(((COALESCE(q1, (0)::double precision) + COALESCE(q2, (0)::double precision)) + COALESCE(q3, (0)::double precision))) AS avg_total_q,
+    avg(((COALESCE(s1, (0)::double precision) + COALESCE(s2, (0)::double precision)) + COALESCE(s3, (0)::double precision))) AS avg_total_s,
+    avg(v1) AS avg_v1,
+    min(v1) AS min_v1,
+    max(v1) AS max_v1,
+    avg(v2) AS avg_v2,
+    min(v2) AS min_v2,
+    max(v2) AS max_v2,
+    avg(v3) AS avg_v3,
+    min(v3) AS min_v3,
+    max(v3) AS max_v3,
+    avg(i1) AS avg_i1,
+    max(i1) AS max_i1,
+    avg(i2) AS avg_i2,
+    max(i2) AS max_i2,
+    avg(i3) AS avg_i3,
+    max(i3) AS max_i3,
+    avg(i_neutral) AS avg_i_neutral,
+    max(i_neutral) AS max_i_neutral,
+    avg(f1) AS avg_f,
+    min(f1) AS min_f,
+    max(f1) AS max_f,
+    avg(pf1) AS avg_pf1,
+    avg(pf2) AS avg_pf2,
+    avg(pf3) AS avg_pf3,
+    avg(thd1) AS avg_thd1,
+    max(thd1) AS max_thd1,
+    avg(thd2) AS avg_thd2,
+    max(thd2) AS max_thd2,
+    avg(thd3) AS avg_thd3,
+    max(thd3) AS max_thd3,
+    avg(thvd1) AS avg_thvd1,
+    max(thvd1) AS max_thvd1,
+    avg(thvd2) AS avg_thvd2,
+    max(thvd2) AS max_thvd2,
+    avg(thvd3) AS avg_thvd3,
+    max(thvd3) AS max_thvd3
+   FROM public.measurements
+  GROUP BY device_id, (public.time_bucket('00:15:00'::interval, "time"));
+
+
+--
 -- Name: alarm_events; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -388,7 +1134,8 @@ CREATE TABLE public.alarm_rules (
     enabled boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     is_active boolean DEFAULT false NOT NULL,
-    last_triggered_at timestamp with time zone
+    last_triggered_at timestamp with time zone,
+    offline_stage integer DEFAULT 0 NOT NULL
 );
 
 
@@ -513,6 +1260,61 @@ ALTER SEQUENCE public.departments_id_seq OWNED BY public.departments.id;
 
 --
 -- Name: device_energy_hourly; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.device_energy_hourly AS
+ SELECT _materialized_hypertable_10.device_id,
+    _materialized_hypertable_10.bucket,
+    _materialized_hypertable_10.reading_time,
+    _materialized_hypertable_10.first_active_tuketim,
+    _materialized_hypertable_10.active_wh_tuketim,
+    _materialized_hypertable_10.max_active_tuketim,
+    _materialized_hypertable_10.first_inductive_tuketim,
+    _materialized_hypertable_10.inductive_varh_tuketim,
+    _materialized_hypertable_10.max_inductive_tuketim,
+    _materialized_hypertable_10.first_capacitive_tuketim,
+    _materialized_hypertable_10.capacitive_varh_tuketim,
+    _materialized_hypertable_10.max_capacitive_tuketim,
+    _materialized_hypertable_10.first_active_uretim,
+    _materialized_hypertable_10.active_wh_uretim,
+    _materialized_hypertable_10.max_active_uretim,
+    _materialized_hypertable_10.first_inductive_uretim,
+    _materialized_hypertable_10.inductive_varh_uretim,
+    _materialized_hypertable_10.max_inductive_uretim,
+    _materialized_hypertable_10.first_capacitive_uretim,
+    _materialized_hypertable_10.capacitive_varh_uretim,
+    _materialized_hypertable_10.max_capacitive_uretim
+   FROM _timescaledb_internal._materialized_hypertable_10
+  WHERE (_materialized_hypertable_10.bucket < COALESCE(_timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(10)), '-infinity'::timestamp with time zone))
+UNION ALL
+ SELECT device_energy.device_id,
+    public.time_bucket('01:00:00'::interval, device_energy."time") AS bucket,
+    public.last(device_energy."time", device_energy."time") AS reading_time,
+    public.first(device_energy.active_wh_tuketim, device_energy."time") AS first_active_tuketim,
+    public.last(device_energy.active_wh_tuketim, device_energy."time") AS active_wh_tuketim,
+    max(device_energy.active_wh_tuketim) AS max_active_tuketim,
+    public.first(device_energy.inductive_varh_tuketim, device_energy."time") AS first_inductive_tuketim,
+    public.last(device_energy.inductive_varh_tuketim, device_energy."time") AS inductive_varh_tuketim,
+    max(device_energy.inductive_varh_tuketim) AS max_inductive_tuketim,
+    public.first(device_energy.capacitive_varh_tuketim, device_energy."time") AS first_capacitive_tuketim,
+    public.last(device_energy.capacitive_varh_tuketim, device_energy."time") AS capacitive_varh_tuketim,
+    max(device_energy.capacitive_varh_tuketim) AS max_capacitive_tuketim,
+    public.first(device_energy.active_wh_uretim, device_energy."time") AS first_active_uretim,
+    public.last(device_energy.active_wh_uretim, device_energy."time") AS active_wh_uretim,
+    max(device_energy.active_wh_uretim) AS max_active_uretim,
+    public.first(device_energy.inductive_varh_uretim, device_energy."time") AS first_inductive_uretim,
+    public.last(device_energy.inductive_varh_uretim, device_energy."time") AS inductive_varh_uretim,
+    max(device_energy.inductive_varh_uretim) AS max_inductive_uretim,
+    public.first(device_energy.capacitive_varh_uretim, device_energy."time") AS first_capacitive_uretim,
+    public.last(device_energy.capacitive_varh_uretim, device_energy."time") AS capacitive_varh_uretim,
+    max(device_energy.capacitive_varh_uretim) AS max_capacitive_uretim
+   FROM public.device_energy
+  WHERE (device_energy."time" >= COALESCE(_timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(10)), '-infinity'::timestamp with time zone))
+  GROUP BY device_energy.device_id, (public.time_bucket('01:00:00'::interval, device_energy."time"));
+
+
+--
+-- Name: device_info; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.device_info (
@@ -675,6 +1477,158 @@ ALTER SEQUENCE public.firmware_builds_id_seq OWNED BY public.firmware_builds.id;
 
 --
 -- Name: measurements_10min; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.measurements_10min AS
+ SELECT _materialized_hypertable_11.device_id,
+    _materialized_hypertable_11.bucket,
+    _materialized_hypertable_11.sample_count,
+    _materialized_hypertable_11.avg_v1,
+    _materialized_hypertable_11.min_v1,
+    _materialized_hypertable_11.max_v1,
+    _materialized_hypertable_11.avg_v2,
+    _materialized_hypertable_11.min_v2,
+    _materialized_hypertable_11.max_v2,
+    _materialized_hypertable_11.avg_v3,
+    _materialized_hypertable_11.min_v3,
+    _materialized_hypertable_11.max_v3,
+    _materialized_hypertable_11.avg_f,
+    _materialized_hypertable_11.min_f,
+    _materialized_hypertable_11.max_f,
+    _materialized_hypertable_11.avg_thvd1,
+    _materialized_hypertable_11.max_thvd1,
+    _materialized_hypertable_11.avg_thvd2,
+    _materialized_hypertable_11.max_thvd2,
+    _materialized_hypertable_11.avg_thvd3,
+    _materialized_hypertable_11.max_thvd3
+   FROM _timescaledb_internal._materialized_hypertable_11
+  WHERE (_materialized_hypertable_11.bucket < COALESCE(_timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(11)), '-infinity'::timestamp with time zone))
+UNION ALL
+ SELECT measurements.device_id,
+    public.time_bucket('00:10:00'::interval, measurements."time") AS bucket,
+    count(*) AS sample_count,
+    avg(measurements.v1) AS avg_v1,
+    min(measurements.v1) AS min_v1,
+    max(measurements.v1) AS max_v1,
+    avg(measurements.v2) AS avg_v2,
+    min(measurements.v2) AS min_v2,
+    max(measurements.v2) AS max_v2,
+    avg(measurements.v3) AS avg_v3,
+    min(measurements.v3) AS min_v3,
+    max(measurements.v3) AS max_v3,
+    avg(measurements.f1) AS avg_f,
+    min(measurements.f1) AS min_f,
+    max(measurements.f1) AS max_f,
+    avg(measurements.thvd1) AS avg_thvd1,
+    max(measurements.thvd1) AS max_thvd1,
+    avg(measurements.thvd2) AS avg_thvd2,
+    max(measurements.thvd2) AS max_thvd2,
+    avg(measurements.thvd3) AS avg_thvd3,
+    max(measurements.thvd3) AS max_thvd3
+   FROM public.measurements
+  WHERE (measurements."time" >= COALESCE(_timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(11)), '-infinity'::timestamp with time zone))
+  GROUP BY measurements.device_id, (public.time_bucket('00:10:00'::interval, measurements."time"));
+
+
+--
+-- Name: measurements_15min; Type: VIEW; Schema: public; Owner: -
+--
+
+CREATE VIEW public.measurements_15min AS
+ SELECT _materialized_hypertable_9.device_id,
+    _materialized_hypertable_9.bucket,
+    _materialized_hypertable_9.sample_count,
+    _materialized_hypertable_9.avg_total_p,
+    _materialized_hypertable_9.max_total_p,
+    _materialized_hypertable_9.avg_total_q,
+    _materialized_hypertable_9.avg_total_s,
+    _materialized_hypertable_9.avg_v1,
+    _materialized_hypertable_9.min_v1,
+    _materialized_hypertable_9.max_v1,
+    _materialized_hypertable_9.avg_v2,
+    _materialized_hypertable_9.min_v2,
+    _materialized_hypertable_9.max_v2,
+    _materialized_hypertable_9.avg_v3,
+    _materialized_hypertable_9.min_v3,
+    _materialized_hypertable_9.max_v3,
+    _materialized_hypertable_9.avg_i1,
+    _materialized_hypertable_9.max_i1,
+    _materialized_hypertable_9.avg_i2,
+    _materialized_hypertable_9.max_i2,
+    _materialized_hypertable_9.avg_i3,
+    _materialized_hypertable_9.max_i3,
+    _materialized_hypertable_9.avg_i_neutral,
+    _materialized_hypertable_9.max_i_neutral,
+    _materialized_hypertable_9.avg_f,
+    _materialized_hypertable_9.min_f,
+    _materialized_hypertable_9.max_f,
+    _materialized_hypertable_9.avg_pf1,
+    _materialized_hypertable_9.avg_pf2,
+    _materialized_hypertable_9.avg_pf3,
+    _materialized_hypertable_9.avg_thd1,
+    _materialized_hypertable_9.max_thd1,
+    _materialized_hypertable_9.avg_thd2,
+    _materialized_hypertable_9.max_thd2,
+    _materialized_hypertable_9.avg_thd3,
+    _materialized_hypertable_9.max_thd3,
+    _materialized_hypertable_9.avg_thvd1,
+    _materialized_hypertable_9.max_thvd1,
+    _materialized_hypertable_9.avg_thvd2,
+    _materialized_hypertable_9.max_thvd2,
+    _materialized_hypertable_9.avg_thvd3,
+    _materialized_hypertable_9.max_thvd3
+   FROM _timescaledb_internal._materialized_hypertable_9
+  WHERE (_materialized_hypertable_9.bucket < COALESCE(_timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(9)), '-infinity'::timestamp with time zone))
+UNION ALL
+ SELECT measurements.device_id,
+    public.time_bucket('00:15:00'::interval, measurements."time") AS bucket,
+    count(*) AS sample_count,
+    avg(((COALESCE(measurements.p1, (0)::double precision) + COALESCE(measurements.p2, (0)::double precision)) + COALESCE(measurements.p3, (0)::double precision))) AS avg_total_p,
+    max(((COALESCE(measurements.p1, (0)::double precision) + COALESCE(measurements.p2, (0)::double precision)) + COALESCE(measurements.p3, (0)::double precision))) AS max_total_p,
+    avg(((COALESCE(measurements.q1, (0)::double precision) + COALESCE(measurements.q2, (0)::double precision)) + COALESCE(measurements.q3, (0)::double precision))) AS avg_total_q,
+    avg(((COALESCE(measurements.s1, (0)::double precision) + COALESCE(measurements.s2, (0)::double precision)) + COALESCE(measurements.s3, (0)::double precision))) AS avg_total_s,
+    avg(measurements.v1) AS avg_v1,
+    min(measurements.v1) AS min_v1,
+    max(measurements.v1) AS max_v1,
+    avg(measurements.v2) AS avg_v2,
+    min(measurements.v2) AS min_v2,
+    max(measurements.v2) AS max_v2,
+    avg(measurements.v3) AS avg_v3,
+    min(measurements.v3) AS min_v3,
+    max(measurements.v3) AS max_v3,
+    avg(measurements.i1) AS avg_i1,
+    max(measurements.i1) AS max_i1,
+    avg(measurements.i2) AS avg_i2,
+    max(measurements.i2) AS max_i2,
+    avg(measurements.i3) AS avg_i3,
+    max(measurements.i3) AS max_i3,
+    avg(measurements.i_neutral) AS avg_i_neutral,
+    max(measurements.i_neutral) AS max_i_neutral,
+    avg(measurements.f1) AS avg_f,
+    min(measurements.f1) AS min_f,
+    max(measurements.f1) AS max_f,
+    avg(measurements.pf1) AS avg_pf1,
+    avg(measurements.pf2) AS avg_pf2,
+    avg(measurements.pf3) AS avg_pf3,
+    avg(measurements.thd1) AS avg_thd1,
+    max(measurements.thd1) AS max_thd1,
+    avg(measurements.thd2) AS avg_thd2,
+    max(measurements.thd2) AS max_thd2,
+    avg(measurements.thd3) AS avg_thd3,
+    max(measurements.thd3) AS max_thd3,
+    avg(measurements.thvd1) AS avg_thvd1,
+    max(measurements.thvd1) AS max_thvd1,
+    avg(measurements.thvd2) AS avg_thvd2,
+    max(measurements.thvd2) AS max_thvd2,
+    avg(measurements.thvd3) AS avg_thvd3,
+    max(measurements.thvd3) AS max_thvd3
+   FROM public.measurements
+  WHERE (measurements."time" >= COALESCE(_timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(9)), '-infinity'::timestamp with time zone))
+  GROUP BY measurements.device_id, (public.time_bucket('00:15:00'::interval, measurements."time"));
+
+
+--
+-- Name: member_departments; Type: TABLE; Schema: public; Owner: -
 --
 
 CREATE TABLE public.member_departments (
@@ -931,6 +1885,111 @@ CREATE SEQUENCE public.users_id_seq
 --
 
 ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
+
+
+--
+-- Name: _hyper_1_15_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_15_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_1_1_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_1_2_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_1_5_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_5_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_3_16_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_16_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_3_3_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_3_4_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_3_4_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_4_17_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_4_17_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_4_6_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_4_6_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_5_18_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_5_18_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_5_7_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_5_7_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_6_19_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_6_19_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_6_8_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_6_8_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_7_20_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_7_20_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_7_9_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_7_9_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
@@ -1245,6 +2304,377 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_username_key UNIQUE (username);
+
+
+--
+-- Name: _hyper_10_14_chunk__materialized_hypertable_10_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_10_14_chunk__materialized_hypertable_10_bucket_idx ON _timescaledb_internal._hyper_10_14_chunk USING btree (bucket DESC);
+
+
+--
+-- Name: _hyper_10_14_chunk__materialized_hypertable_10_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_10_14_chunk__materialized_hypertable_10_device_id_bucket ON _timescaledb_internal._hyper_10_14_chunk USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _hyper_11_21_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_11_21_chunk__materialized_hypertable_11_bucket_idx ON _timescaledb_internal._hyper_11_21_chunk USING btree (bucket DESC);
+
+
+--
+-- Name: _hyper_11_21_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_11_21_chunk__materialized_hypertable_11_device_id_bucket ON _timescaledb_internal._hyper_11_21_chunk USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _hyper_11_22_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_11_22_chunk__materialized_hypertable_11_bucket_idx ON _timescaledb_internal._hyper_11_22_chunk USING btree (bucket DESC);
+
+
+--
+-- Name: _hyper_11_22_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_11_22_chunk__materialized_hypertable_11_device_id_bucket ON _timescaledb_internal._hyper_11_22_chunk USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _hyper_11_23_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_11_23_chunk__materialized_hypertable_11_bucket_idx ON _timescaledb_internal._hyper_11_23_chunk USING btree (bucket DESC);
+
+
+--
+-- Name: _hyper_11_23_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_11_23_chunk__materialized_hypertable_11_device_id_bucket ON _timescaledb_internal._hyper_11_23_chunk USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _hyper_1_15_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_15_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_15_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_1_15_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_15_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_15_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_1_1_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_1_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_1_1_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
+
+
+--
+-- Name: _hyper_1_1_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_1_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_1_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_1_1_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_1_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_1_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_1_2_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_2_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_1_2_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
+
+
+--
+-- Name: _hyper_1_2_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_2_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_2_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_1_2_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_2_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_2_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_1_5_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_5_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_5_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_1_5_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_5_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_5_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_3_16_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_3_16_chunk_device_energy_device_time_idx ON _timescaledb_internal._hyper_3_16_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_3_16_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_3_16_chunk_device_energy_time_idx ON _timescaledb_internal._hyper_3_16_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_3_3_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_3_3_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_3_3_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
+
+
+--
+-- Name: _hyper_3_3_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_3_3_chunk_device_energy_device_time_idx ON _timescaledb_internal._hyper_3_3_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_3_3_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_3_3_chunk_device_energy_time_idx ON _timescaledb_internal._hyper_3_3_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_3_4_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_3_4_chunk_device_energy_device_time_idx ON _timescaledb_internal._hyper_3_4_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_3_4_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_3_4_chunk_device_energy_time_idx ON _timescaledb_internal._hyper_3_4_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_4_17_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_4_17_chunk_device_stats_device_time_idx ON _timescaledb_internal._hyper_4_17_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_4_17_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_4_17_chunk_device_stats_time_idx ON _timescaledb_internal._hyper_4_17_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_4_6_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_4_6_chunk_device_stats_device_time_idx ON _timescaledb_internal._hyper_4_6_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_4_6_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_4_6_chunk_device_stats_time_idx ON _timescaledb_internal._hyper_4_6_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_5_18_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_5_18_chunk_device_peaks_device_time_idx ON _timescaledb_internal._hyper_5_18_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_5_18_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_5_18_chunk_device_peaks_time_idx ON _timescaledb_internal._hyper_5_18_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_5_7_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_5_7_chunk_device_peaks_device_time_idx ON _timescaledb_internal._hyper_5_7_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_5_7_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_5_7_chunk_device_peaks_time_idx ON _timescaledb_internal._hyper_5_7_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_6_19_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_6_19_chunk_device_demand_device_time_idx ON _timescaledb_internal._hyper_6_19_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_6_19_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_6_19_chunk_device_demand_time_idx ON _timescaledb_internal._hyper_6_19_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_6_8_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_6_8_chunk_device_demand_device_time_idx ON _timescaledb_internal._hyper_6_8_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_6_8_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_6_8_chunk_device_demand_time_idx ON _timescaledb_internal._hyper_6_8_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_7_20_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_7_20_chunk_device_harmonics_device_time_idx ON _timescaledb_internal._hyper_7_20_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_7_20_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_7_20_chunk_device_harmonics_time_idx ON _timescaledb_internal._hyper_7_20_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_7_9_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_7_9_chunk_device_harmonics_device_time_idx ON _timescaledb_internal._hyper_7_9_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_7_9_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_7_9_chunk_device_harmonics_time_idx ON _timescaledb_internal._hyper_7_9_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_9_11_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_9_11_chunk__materialized_hypertable_9_bucket_idx ON _timescaledb_internal._hyper_9_11_chunk USING btree (bucket DESC);
+
+
+--
+-- Name: _hyper_9_11_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_9_11_chunk__materialized_hypertable_9_device_id_bucket_i ON _timescaledb_internal._hyper_9_11_chunk USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _hyper_9_12_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_9_12_chunk__materialized_hypertable_9_bucket_idx ON _timescaledb_internal._hyper_9_12_chunk USING btree (bucket DESC);
+
+
+--
+-- Name: _hyper_9_12_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_9_12_chunk__materialized_hypertable_9_device_id_bucket_i ON _timescaledb_internal._hyper_9_12_chunk USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _hyper_9_13_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_9_13_chunk__materialized_hypertable_9_bucket_idx ON _timescaledb_internal._hyper_9_13_chunk USING btree (bucket DESC);
+
+
+--
+-- Name: _hyper_9_13_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_9_13_chunk__materialized_hypertable_9_device_id_bucket_i ON _timescaledb_internal._hyper_9_13_chunk USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _materialized_hypertable_10_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _materialized_hypertable_10_bucket_idx ON _timescaledb_internal._materialized_hypertable_10 USING btree (bucket DESC);
+
+
+--
+-- Name: _materialized_hypertable_10_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _materialized_hypertable_10_device_id_bucket_idx ON _timescaledb_internal._materialized_hypertable_10 USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _materialized_hypertable_11_bucket_idx ON _timescaledb_internal._materialized_hypertable_11 USING btree (bucket DESC);
+
+
+--
+-- Name: _materialized_hypertable_11_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _materialized_hypertable_11_device_id_bucket_idx ON _timescaledb_internal._materialized_hypertable_11 USING btree (device_id, bucket DESC);
+
+
+--
+-- Name: _materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _materialized_hypertable_9_bucket_idx ON _timescaledb_internal._materialized_hypertable_9 USING btree (bucket DESC);
+
+
+--
+-- Name: _materialized_hypertable_9_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _materialized_hypertable_9_device_id_bucket_idx ON _timescaledb_internal._materialized_hypertable_9 USING btree (device_id, bucket DESC);
 
 
 --
@@ -1563,5 +2993,5 @@ ALTER TABLE ONLY public.subscriptions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict ORZpet7MrYcgP1vAoMvkjVvYfWFwgazar84vxLKAIPq2RYeG6FhbWp1edX0CwHm
+\unrestrict UAYAPYzOKzqHFE7NIDHeVcrd8MnvfvGT5WyZnxtU6W3KT6lLsupKBVGWxXeCdty
 
