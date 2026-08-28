@@ -618,6 +618,171 @@ function PushToggle({ token }) {
   );
 }
 
+// ---------- KVKK: veri dışa aktarma ve hesap silme ----------
+// KVKK madde 11, ilgili kişiye verilerinin akıbetini öğrenme ve silinmesini
+// isteme hakkı veriyor. Bu bölüm o hakları e-posta yazışmasına gerek
+// kalmadan kullanılabilir kılıyor.
+function KvkkSection({ token, username }) {
+  const [busy, setBusy] = useState('');
+  const [error, setError] = useState('');
+  const [silmeAcik, setSilmeAcik] = useState(false);
+  const [sifre, setSifre] = useState('');
+  const [onay, setOnay] = useState('');
+
+  async function disaAktar() {
+    setBusy('export'); setError('');
+    try {
+      const res = await axios.get(`${API_BASE}/me/data-export`, {
+        headers: { Authorization: `Bearer ${token}` }, responseType: 'blob',
+      });
+      const url = URL.createObjectURL(res.data);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${username}-kisisel-veriler.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError('Veriler indirilemedi.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function hesabiSil() {
+    setBusy('delete'); setError('');
+    try {
+      await axios.post(`${API_BASE}/me/delete`, { password: sifre, confirm: onay },
+        { headers: { Authorization: `Bearer ${token}` } });
+      localStorage.removeItem('token');
+      window.location.reload();
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Hesap silinemedi.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  const alan = {
+    width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-xs)',
+    border: '1px solid var(--border)', background: 'var(--surface)',
+    color: 'var(--ink)', fontSize: 13, fontFamily: 'inherit', marginBottom: 8,
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Kişisel Verileriniz</div>
+      <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12 }}>
+        KVKK kapsamında verilerinizin bir kopyasını indirebilir veya hesabınızı
+        tamamen silebilirsiniz.
+      </div>
+
+      <button type="button" onClick={disaAktar} disabled={busy === 'export'} style={{
+        padding: '8px 16px', borderRadius: 'var(--radius-xs)',
+        border: '1px solid var(--border)', background: 'var(--surface)',
+        color: 'var(--ink)', fontSize: 12, fontWeight: 600,
+        cursor: busy ? 'default' : 'pointer',
+      }}>
+        {busy === 'export' ? 'Hazırlanıyor…' : 'Verilerimi indir'}
+      </button>
+
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+        {!silmeAcik ? (
+          <button type="button" onClick={() => setSilmeAcik(true)} style={{
+            background: 'none', border: 'none', color: 'var(--danger)',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', padding: 0,
+            textDecoration: 'underline',
+          }}>Hesabımı sil</button>
+        ) : (
+          <div>
+            <div style={{
+              fontSize: 12, color: 'var(--ink)', marginBottom: 12, padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)',
+              background: 'color-mix(in srgb, var(--danger) 8%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--danger) 30%, var(--border))',
+            }}>
+              <b style={{ color: 'var(--danger)' }}>Bu işlem geri alınamaz.</b> Hesabınız ve
+              kişisel verileriniz silinir. <b>Cihazlarınız ve ölçüm geçmişiniz silinmez</b> —
+              organizasyona ait oldukları için sahiplikleri başka bir yöneticiye devredilir.
+              Devredilecek başka yönetici yoksa silme yapılamaz.
+            </div>
+            <input style={alan} type="password" placeholder="Şifreniz"
+                   value={sifre} onChange={(e) => setSifre(e.target.value)} />
+            <input style={alan} placeholder={`Onaylamak için "${username}" yazın`}
+                   value={onay} onChange={(e) => setOnay(e.target.value)} />
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+              <button type="button" onClick={hesabiSil}
+                      disabled={busy === 'delete' || onay !== username || !sifre}
+                      style={{
+                        padding: '8px 16px', borderRadius: 'var(--radius-xs)', border: 'none',
+                        background: onay === username && sifre ? 'var(--danger)' : 'var(--border)',
+                        color: '#fff', fontSize: 12, fontWeight: 600,
+                        cursor: onay === username && sifre ? 'pointer' : 'default',
+                      }}>
+                {busy === 'delete' ? 'Siliniyor…' : 'Hesabımı kalıcı olarak sil'}
+              </button>
+              <button type="button" onClick={() => { setSilmeAcik(false); setSifre(''); setOnay(''); setError(''); }}
+                      style={{
+                        background: 'none', border: 'none', color: 'var(--muted)',
+                        fontSize: 12, cursor: 'pointer', padding: 0,
+                      }}>Vazgeç</button>
+            </div>
+          </div>
+        )}
+      </div>
+      {error && <div style={{ fontSize: 12, color: 'var(--danger)', marginTop: 10 }}>{error}</div>}
+    </div>
+  );
+}
+
+// ---------- Denetim kaydı ----------
+function AuditLog({ token }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/organization/audit?limit=100`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => setRows(res.data))
+      .catch((e) => setError(e.response?.status === 403
+        ? 'Denetim kaydını yalnızca organizasyon yöneticisi görebilir.'
+        : 'Denetim kaydı yüklenemedi.'));
+  }, [token]);
+
+  if (error) return <div style={{ fontSize: 12, color: 'var(--muted)' }}>{error}</div>;
+  if (rows === null) return <div style={{ fontSize: 12, color: 'var(--muted)' }}>Yükleniyor…</div>;
+  if (rows.length === 0) return <div style={{ fontSize: 12, color: 'var(--muted)' }}>Henüz kayıt yok.</div>;
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 560 }}>
+        <thead>
+          <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
+            <th style={{ padding: '6px 8px' }}>Zaman</th>
+            <th style={{ padding: '6px 8px' }}>Kim</th>
+            <th style={{ padding: '6px 8px' }}>İşlem</th>
+            <th style={{ padding: '6px 8px' }}>Nesne</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} style={{ borderTop: '1px solid var(--border)' }}>
+              <td className="mono" style={{ padding: '6px 8px', color: 'var(--muted)', whiteSpace: 'nowrap' }}>
+                {new Date(r.at).toLocaleString('tr-TR', {
+                  day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+              </td>
+              <td style={{ padding: '6px 8px', fontWeight: 500 }}>{r.actor || '—'}</td>
+              <td style={{ padding: '6px 8px' }}>{r.label}</td>
+              <td className="mono" style={{ padding: '6px 8px', color: 'var(--muted)' }}>
+                {r.entity_id || '—'}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 // E-posta tercihi anahtarı — aylık rapor ve alarm e-postası aynı desende,
 // tek bileşen kullanılıyor ki metin ve davranış ayrışmasın.
 function EmailPrefToggle({ token, path, enabled, title, description, onLabel, onChanged }) {
@@ -774,6 +939,10 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
               <PasswordChangeForm token={token} />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
+              <KvkkSection token={token} username={profile.username} />
             </div>
 
             <button onClick={onLogout} className="logout-link" style={{
@@ -1721,6 +1890,19 @@ function OrganizationPage({ token, onBack }) {
               </div>
 
               <InviteSection org={org} headers={headers} onError={setError} />
+            </div>
+          )}
+
+          {isOrgAdmin && (
+            <div style={{
+              background: 'var(--surface)', border: '1px solid var(--border)',
+              borderRadius: 'var(--radius-md)', padding: 20, marginTop: 24,
+            }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Denetim Kaydı</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
+                Organizasyonunuzda kim, ne zaman, neyi değiştirdi. Son 100 işlem.
+              </div>
+              <AuditLog token={token} />
             </div>
           )}
         </>

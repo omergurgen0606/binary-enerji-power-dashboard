@@ -19,6 +19,21 @@ echo "→ şema uygulanıyor"
 ssh "$HOST" "docker exec -i \$(docker ps -qf name=timescaledb) psql -U postgres -d $TEST_DB -v ON_ERROR_STOP=1" \
   < "$REPO/ops/schema/00-baseline.sql" >/dev/null
 
+# Şema kayması kontrolü: baseline üretimden geri kalırsa testler var olmayan
+# tablolara karşı çalışır ve sessizce eksik kapsam üretir. Bugün tam bu oldu:
+# audit_log üretimde vardı, baseline'da yoktu.
+echo "→ şema kayması kontrolü"
+URETIM=$(ssh "$HOST" "docker exec \$(docker ps -qf name=timescaledb) psql -U postgres -d postgres -t -c \"SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1\"" | tr -d ' ' | grep -v '^$' | sort)
+TEST=$(ssh "$HOST" "docker exec \$(docker ps -qf name=timescaledb) psql -U postgres -d $TEST_DB -t -c \"SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1\"" | tr -d ' ' | grep -v '^$' | sort)
+FARK=$(comm -23 <(echo "$URETIM") <(echo "$TEST"))
+if [ -n "$FARK" ]; then
+  echo "✗ ŞEMA KAYMASI: üretimde olup baseline'da olmayan tablolar:" >&2
+  echo "$FARK" | sed 's/^/    /' >&2
+  echo "  ops/schema/00-baseline.sql yeniden üretilmeli." >&2
+  exit 1
+fi
+echo "  ✓ baseline üretimle aynı"
+
 echo "→ testler kopyalanıyor"
 CID=$(ssh "$HOST" "docker ps -qf name=root-api")
 tar czf - -C "$REPO" tests | ssh "$HOST" "docker exec -i $CID tar xzf - -C /app"

@@ -26,7 +26,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 5ytcmU5Qta7snYtjiEkx1LYIMfXA9uaHA9lFgZZW1dJh2u1Q5PfVYPnWezflT3R
+\restrict ORZpet7MrYcgP1vAoMvkjVvYfWFwgazar84vxLKAIPq2RYeG6FhbWp1edX0CwHm
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -410,6 +410,73 @@ CREATE SEQUENCE public.alarm_rules_id_seq
 --
 
 ALTER SEQUENCE public.alarm_rules_id_seq OWNED BY public.alarm_rules.id;
+
+
+--
+-- Name: audit_log; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.audit_log (
+    id bigint NOT NULL,
+    at timestamp with time zone DEFAULT now() NOT NULL,
+    actor text,
+    organization_id integer,
+    action text NOT NULL,
+    entity_type text,
+    entity_id text,
+    detail jsonb,
+    ip text
+);
+
+
+--
+-- Name: audit_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.audit_log_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: audit_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.audit_log_id_seq OWNED BY public.audit_log.id;
+
+
+--
+-- Name: deletion_requests; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.deletion_requests (
+    id bigint NOT NULL,
+    requested_at timestamp with time zone DEFAULT now() NOT NULL,
+    user_hash text NOT NULL,
+    note text
+);
+
+
+--
+-- Name: deletion_requests_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.deletion_requests_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: deletion_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.deletion_requests_id_seq OWNED BY public.deletion_requests.id;
 
 
 --
@@ -881,6 +948,20 @@ ALTER TABLE ONLY public.alarm_rules ALTER COLUMN id SET DEFAULT nextval('public.
 
 
 --
+-- Name: audit_log id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_log ALTER COLUMN id SET DEFAULT nextval('public.audit_log_id_seq'::regclass);
+
+
+--
+-- Name: deletion_requests id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deletion_requests ALTER COLUMN id SET DEFAULT nextval('public.deletion_requests_id_seq'::regclass);
+
+
+--
 -- Name: departments id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -964,6 +1045,22 @@ ALTER TABLE ONLY public.alarm_events
 
 ALTER TABLE ONLY public.alarm_rules
     ADD CONSTRAINT alarm_rules_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.audit_log
+    ADD CONSTRAINT audit_log_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: deletion_requests deletion_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.deletion_requests
+    ADD CONSTRAINT deletion_requests_pkey PRIMARY KEY (id);
 
 
 --
@@ -1162,6 +1259,20 @@ CREATE INDEX alarm_events_device_time_idx ON public.alarm_events USING btree (de
 --
 
 CREATE INDEX alarm_rules_device_idx ON public.alarm_rules USING btree (device_id) WHERE enabled;
+
+
+--
+-- Name: audit_log_actor_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_log_actor_idx ON public.audit_log USING btree (actor, at DESC);
+
+
+--
+-- Name: audit_log_org_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX audit_log_org_idx ON public.audit_log USING btree (organization_id, at DESC);
 
 
 --
@@ -1452,5 +1563,5 @@ ALTER TABLE ONLY public.subscriptions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 5ytcmU5Qta7snYtjiEkx1LYIMfXA9uaHA9lFgZZW1dJh2u1Q5PfVYPnWezflT3R
+\unrestrict ORZpet7MrYcgP1vAoMvkjVvYfWFwgazar84vxLKAIPq2RYeG6FhbWp1edX0CwHm
 
