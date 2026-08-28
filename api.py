@@ -2924,6 +2924,32 @@ def _ensure_report_fonts():
     _FONTS_REGISTERED = True
 
 
+LOGO_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo.png")
+_logo_cache: dict[bool, object] = {}
+
+
+def _logo_reader(white: bool = False):
+    """Marka isareti. Koyu baslik seridinde kullanmak icin alfa kanali
+    korunarak RGB beyaza cevriliyor. Dosya yoksa rapor logosuz uretiliyor --
+    logo eksikligi raporu bozmamali."""
+    if white in _logo_cache:
+        return _logo_cache[white]
+    try:
+        from PIL import Image
+        from reportlab.lib.utils import ImageReader
+        img = Image.open(LOGO_PATH).convert("RGBA")
+        if white:
+            alpha = img.split()[3]
+            solid = Image.new("L", img.size, 255)
+            img = Image.merge("RGBA", (solid, solid, solid, alpha))
+        reader = ImageReader(img)
+    except Exception as e:
+        logger.warning("Rapor logosu yuklenemedi: %s", e)
+        reader = None
+    _logo_cache[white] = reader
+    return reader
+
+
 def _month_bounds(year: int, month: int):
     """Yerel ay siniri. Faturalama ayi yereldir, UTC degil -- bu yuzden yerel
     ayin ilk ani hesaplanip UTC'ye cevriliyor."""
@@ -2992,18 +3018,23 @@ def _report_recommendations(row: dict | None, reactive: dict | None, tariff: dic
     if not row:
         return tips
 
+    # Fiyat girilmemisse tutar cumleleri "0.00 TL" diye anlamsiz cikiyor;
+    # o durumda sadece fiziksel buyukluklerden bahsediyoruz.
     if reactive and reactive.get("suggested_kvar"):
+        ceza = (f" Bu dönem reaktif ceza {row['reactive_cost']:,.2f} ₺."
+                if tariff["reactive_price"] > 0 else "")
         tips.append(
             f"Endüktif reaktif oranı %{reactive['inductive_pct']} ile "
             f"%{tariff['inductive_limit_pct']:g} limitinin üzerinde. Aşımı kapatmak için "
-            f"yaklaşık {reactive['suggested_kvar']} kVAr kompanzasyon gerekiyor; "
-            f"bu dönem reaktif ceza {row['reactive_cost']:,.2f} ₺."
+            f"yaklaşık {reactive['suggested_kvar']} kVAr kompanzasyon gerekiyor.{ceza}"
         )
     if (row.get("overrun_kw") or 0) > 0:
         peak_txt = row["peak_time"].strftime("%d.%m.%Y %H:%M") if row.get("peak_time") else "—"
+        bedel = (f", {row['demand_cost']:,.2f} ₺ bedel"
+                 if tariff["demand_price"] > 0 else "")
         tips.append(
             f"Tepe güç {row['peak_kw']} kW, sözleşme gücü {row['contract_power_kw']:g} kW — "
-            f"{row['overrun_kw']} kW aşım, {row['demand_cost']:,.2f} ₺ bedel. "
+            f"{row['overrun_kw']} kW aşım{bedel}. "
             f"Tepe {peak_txt} anında oluştu; o saatteki yüklerin bir kısmı kaydırılabilirse "
             f"aşım tamamen ortadan kalkabilir."
         )
@@ -3024,7 +3055,7 @@ def build_monthly_pdf(device_id: str, year: int, month: int) -> bytes:
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.pdfgen import canvas as pdfcanvas
-    from reportlab.platypus import Paragraph, Frame
+    from reportlab.platypus import Paragraph
 
     _ensure_report_fonts()
     start, end = _month_bounds(year, month)
@@ -3045,194 +3076,377 @@ def build_monthly_pdf(device_id: str, year: int, month: int) -> bytes:
     cur.close()
     conn.close()
 
-    # Ilgilendigimiz ayin kovasini bul (yerel ayin ilk gunu).
     key = next((k for k in tou if k.year == year and k.month == month), None)
     row = None
     if key is not None:
         row = _analyze_bill_month(key, tou[key], demand.get(key), reactive_rows.get(key), tariff)
     reactive = reactive_rows.get(key) if key is not None else None
 
+    # --- Marka paleti (web'deki "klasik" tema ile ayni) ---
+    INK = colors.HexColor("#0B1F3A")
+    MUTED = colors.HexColor("#64748B")
+    BORDER = colors.HexColor("#E2E8F0")
+    BG = colors.HexColor("#F4F6F9")
+    AMBER = colors.HexColor("#C97A2B")
+    TEAL = colors.HexColor("#1B7A72")
+    INDIGO = colors.HexColor("#4A5FC1")
+    DANGER = colors.HexColor("#C23B3B")
+    WARN = colors.HexColor("#C98A1A")
+
     buf = io.BytesIO()
     c = pdfcanvas.Canvas(buf, pagesize=A4)
     W, H = A4
-    ink = colors.HexColor("#0B1F3A")
-    muted = colors.HexColor("#6B7A90")
-    danger = colors.HexColor("#C23B3B")
-    accent = colors.HexColor("#1B7A72")
-    line = colors.HexColor("#DCE3EC")
+    L = 16 * mm            # sol kenar
+    R = W - 16 * mm        # sag kenar
+    CW = R - L             # icerik genisligi
 
     def money(v):
-        return f"{v:,.2f} ₺".replace(",", " ")
+        return f"{v:,.2f} ₺".replace(",", " ")
 
-    # --- Baslik ---
-    c.setFillColor(ink)
-    c.rect(0, H - 32 * mm, W, 32 * mm, stroke=0, fill=1)
+    def kwh(v):
+        return f"{v:,.1f}".replace(",", " ")
+
+    # ---------------- Başlık şeridi ----------------
+    band_h = 40 * mm
+    c.setFillColor(INK)
+    c.rect(0, H - band_h, W, band_h, stroke=0, fill=1)
+    # Alt kenara ince marka cizgisi
+    c.setFillColor(AMBER)
+    c.rect(0, H - band_h, W, 1.4 * mm, stroke=0, fill=1)
+
+    logo = _logo_reader(white=True)
+    if logo is not None:
+        c.drawImage(logo, L, H - 20 * mm, width=11 * mm, height=11 * mm, mask="auto")
     c.setFillColor(colors.white)
-    c.setFont(REPORT_FONT_BOLD, 17)
-    c.drawString(18 * mm, H - 15 * mm, "Aylık Enerji Raporu")
-    c.setFont(REPORT_FONT, 10)
-    c.drawString(18 * mm, H - 22 * mm, f"{TR_MONTHS[month - 1]} {year}")
-    c.setFont(REPORT_FONT_BOLD, 11)
-    c.drawRightString(W - 18 * mm, H - 15 * mm, info["name"])
-    c.setFont(REPORT_FONT, 8.5)
-    yer = " · ".join(x for x in (info["organization"], info["facility"], info["department"]) if x)
-    c.drawRightString(W - 18 * mm, H - 21 * mm, yer or device_id)
-    c.drawRightString(W - 18 * mm, H - 26 * mm, f"Rapor: {datetime.now().strftime('%d.%m.%Y')}")
+    c.setFont(REPORT_FONT_BOLD, 9)
+    c.drawString(L + 14 * mm, H - 14.5 * mm, "BINARY ENERJİ")
+    c.setFillColor(colors.Color(1, 1, 1, alpha=0.55))
+    c.setFont(REPORT_FONT, 7.5)
+    c.drawString(L + 14 * mm, H - 18.5 * mm, "Güç İzleme ve Enerji Analizi")
 
-    y = H - 44 * mm
+    c.setFillColor(colors.white)
+    c.setFont(REPORT_FONT_BOLD, 19)
+    c.drawString(L, H - 32 * mm, "Aylık Enerji Raporu")
+
+    c.setFont(REPORT_FONT_BOLD, 12)
+    c.drawRightString(R, H - 14.5 * mm, info["name"])
+    c.setFillColor(colors.Color(1, 1, 1, alpha=0.6))
+    c.setFont(REPORT_FONT, 8)
+    yer = " · ".join(x for x in (info["organization"], info["facility"], info["department"]) if x)
+    c.drawRightString(R, H - 19 * mm, yer or device_id)
+    c.setFillColor(AMBER)
+    c.setFont(REPORT_FONT_BOLD, 13)
+    c.drawRightString(R, H - 31 * mm, f"{TR_MONTHS[month - 1]} {year}")
+
+    y = H - band_h - 12 * mm
 
     if row is None:
-        c.setFillColor(muted)
+        c.setFillColor(MUTED)
         c.setFont(REPORT_FONT, 11)
-        c.drawString(18 * mm, y, "Bu dönemde cihazdan veri alınmadı.")
+        c.drawString(L, y, "Bu dönemde cihazdan veri alınmadı.")
+        _report_footer(c, W, L, R, INK, MUTED, AMBER)
         c.save()
         return buf.getvalue()
-
-    # --- Fatura dokumu ---
-    c.setFillColor(ink)
-    c.setFont(REPORT_FONT_BOLD, 12)
-    c.drawString(18 * mm, y, "Fatura Dökümü")
-    y -= 8 * mm
 
     priced = tariff["active_price"] > 0 or any(
         tariff[k] > 0 for k in ("t1_price", "t2_price", "t3_price"))
 
+    # Sayfa tasmasi olursa devam sayfasi acabilmek icin gereken baglam.
+    ctx = {"W": W, "H": H, "L": L, "R": R, "INK": INK, "MUTED": MUTED, "AMBER": AMBER,
+           "device_name": info["name"], "period": f"{TR_MONTHS[month - 1]} {year}"}
+
+    # ---------------- Öne çıkan rakam ----------------
+    ceza_toplam = row["demand_cost"] + row["reactive_cost"]
+    if priced:
+        c.setFillColor(MUTED)
+        c.setFont(REPORT_FONT, 8.5)
+        c.drawString(L, y, "TAHMİNİ TOPLAM FATURA")
+        c.setFillColor(INK)
+        c.setFont(REPORT_FONT_BOLD, 30)
+        c.drawString(L, y - 12 * mm, money(row["total_cost"]))
+        if ceza_toplam > 0:
+            pay = ceza_toplam / row["total_cost"] * 100 if row["total_cost"] else 0
+            c.setFillColor(DANGER)
+            c.setFont(REPORT_FONT_BOLD, 9.5)
+            c.drawString(L, y - 17.5 * mm,
+                         f"Bunun {money(ceza_toplam)}'si (%{pay:.0f}) ceza kalemi.")
+    else:
+        c.setFillColor(MUTED)
+        c.setFont(REPORT_FONT, 8.5)
+        c.drawString(L, y, "DÖNEM TÜKETİMİ")
+        c.setFillColor(INK)
+        c.setFont(REPORT_FONT_BOLD, 30)
+        c.drawString(L, y - 12 * mm, f"{kwh(row['active_kwh'])} kWh")
+
+    # Sağdaki küçük göstergeler
+    # Etiketler dogrudan buyuk harfle yaziliyor: Python'un upper()'i Turkce
+    # i -> İ donusumunu yapmiyor, "Tüketim".upper() "TÜKETIM" veriyor.
+    chips = [
+        ("TÜKETİM", f"{kwh(row['active_kwh'])} kWh", INK),
+        ("TEPE GÜÇ", f"{row['peak_kw']:.1f} kW" if row["peak_kw"] is not None else "—",
+         DANGER if (row.get("overrun_kw") or 0) > 0 else INK),
+        ("PUANT ORANI", f"%{row['puant_pct']}" if row["puant_pct"] is not None else "—",
+         DANGER if (row["puant_pct"] or 0) > 25 else INK),
+    ]
+    chip_w = 30 * mm
+    cx = R - len(chips) * chip_w
+    for label, val, col in chips:
+        c.setFillColor(BG)
+        c.roundRect(cx, y - 17 * mm, chip_w - 3 * mm, 15 * mm, 2 * mm, stroke=0, fill=1)
+        c.setFillColor(MUTED)
+        c.setFont(REPORT_FONT, 7)
+        c.drawString(cx + 3 * mm, y - 6.5 * mm, label)
+        c.setFillColor(col)
+        c.setFont(REPORT_FONT_BOLD, 11)
+        c.drawString(cx + 3 * mm, y - 13 * mm, val)
+        cx += chip_w
+    y -= 24 * mm
+
+    # ---------------- Fatura bileşimi çubuğu ----------------
+    if priced and row["total_cost"] > 0:
+        parts = [
+            ("Aktif enerji", row["active_cost"], AMBER),
+            ("Güç aşımı", row["demand_cost"], WARN),
+            ("Reaktif ceza", row["reactive_cost"], DANGER),
+        ]
+        parts = [p for p in parts if p[1] > 0]
+        bar_h = 7 * mm
+        x = L
+        for _, tutar, col in parts:
+            seg = CW * (tutar / row["total_cost"])
+            c.setFillColor(col)
+            c.rect(x, y - bar_h, seg, bar_h, stroke=0, fill=1)
+            x += seg
+        y -= bar_h + 6 * mm
+        lx = L
+        for label, tutar, col in parts:
+            pct = tutar / row["total_cost"] * 100
+            c.setFillColor(col)
+            c.circle(lx + 1.4 * mm, y + 1.2 * mm, 1.4 * mm, stroke=0, fill=1)
+            c.setFillColor(INK)
+            c.setFont(REPORT_FONT_BOLD, 8)
+            c.drawString(lx + 4.5 * mm, y + 2.2 * mm, f"{label} · %{pct:.0f}")
+            c.setFillColor(MUTED)
+            c.setFont(REPORT_FONT, 8)
+            c.drawString(lx + 4.5 * mm, y - 1.8 * mm, money(tutar))
+            lx += CW / len(parts)
+        y -= 9 * mm
+
+    # ---------------- Fatura dökümü ----------------
+    y = _section_title(c, "Fatura Dökümü", L, y, INK, AMBER)
+
     kalemler = [
-        ("Gündüz", f"{row['t1_kwh']:,.1f} kWh", row["t1_cost"], False),
-        ("Puant", f"{row['t2_kwh']:,.1f} kWh"
-                  + (f"  (tüketimin %{row['puant_pct']}'i)" if row["puant_pct"] is not None else ""),
+        ("Gündüz", f"{tariff['t1_start']:02d}:00–{tariff['t2_start']:02d}:00",
+         f"{kwh(row['t1_kwh'])} kWh", row["t1_cost"], False),
+        ("Puant", f"{tariff['t2_start']:02d}:00–{tariff['t3_start']:02d}:00",
+         f"{kwh(row['t2_kwh'])} kWh"
+         + (f"  (%{row['puant_pct']})" if row["puant_pct"] is not None else ""),
          row["t2_cost"], (row["puant_pct"] or 0) > 25),
-        ("Gece", f"{row['t3_kwh']:,.1f} kWh", row["t3_cost"], False),
+        ("Gece", f"{tariff['t3_start']:02d}:00–{tariff['t1_start']:02d}:00",
+         f"{kwh(row['t3_kwh'])} kWh", row["t3_cost"], False),
     ]
     if row.get("overrun_kw") is not None:
         kalemler.append((
-            "Güç aşımı",
-            f"tepe {row['peak_kw']} kW / sözleşme {row['contract_power_kw']:g} kW"
-            + (f"  → +{row['overrun_kw']} kW" if row["overrun_kw"] > 0 else "  → aşım yok"),
+            "Güç aşımı", f"sözleşme {tariff['contract_power_kw']:g} kW",
+            f"tepe {row['peak_kw']:.1f} kW"
+            + (f"  →  +{row['overrun_kw']:.1f} kW" if row["overrun_kw"] > 0 else "  →  aşım yok"),
             row["demand_cost"], row["overrun_kw"] > 0))
     if reactive:
         kalemler.append((
             "Reaktif ceza",
-            f"endüktif %{reactive['inductive_pct']} / kapasitif %{reactive['capacitive_pct']}"
-            f"  (limit %{tariff['inductive_limit_pct']:g} / %{tariff['capacitive_limit_pct']:g})",
+            f"limit %{tariff['inductive_limit_pct']:g} / %{tariff['capacitive_limit_pct']:g}",
+            f"endüktif %{reactive['inductive_pct']} · kapasitif %{reactive['capacitive_pct']}",
             row["reactive_cost"], row["reactive_cost"] > 0))
 
-    c.setFont(REPORT_FONT, 9.5)
-    for label, detay, tutar, vurgu in kalemler:
-        c.setStrokeColor(line)
-        c.line(18 * mm, y + 5 * mm, W - 18 * mm, y + 5 * mm)
-        c.setFillColor(danger if vurgu else ink)
-        c.setFont(REPORT_FONT_BOLD, 9.5)
-        c.drawString(18 * mm, y, label)
-        c.setFillColor(muted)
-        c.setFont(REPORT_FONT, 9)
-        c.drawString(48 * mm, y, detay)
+    rh = 8 * mm
+    for i, (label, alt, detay, tutar, vurgu) in enumerate(kalemler):
+        if i % 2 == 0:
+            c.setFillColor(BG)
+            c.rect(L, y - rh + 2.5 * mm, CW, rh, stroke=0, fill=1)
+        if vurgu:
+            c.setFillColor(DANGER)
+            c.rect(L, y - rh + 2.5 * mm, 1 * mm, rh, stroke=0, fill=1)
+        c.setFillColor(DANGER if vurgu else INK)
+        c.setFont(REPORT_FONT_BOLD, 9)
+        c.drawString(L + 4 * mm, y, label)
+        c.setFillColor(MUTED)
+        c.setFont(REPORT_FONT, 6.8)
+        c.drawString(L + 4 * mm, y - 3.6 * mm, alt)
+        c.setFillColor(INK)
+        c.setFont(REPORT_FONT, 8.5)
+        c.drawString(L + 38 * mm, y, detay)
         if priced:
-            c.setFillColor(danger if vurgu else ink)
-            c.setFont(REPORT_FONT_BOLD if vurgu else REPORT_FONT, 9.5)
-            c.drawRightString(W - 18 * mm, y, money(tutar))
-        y -= 8 * mm
+            c.setFillColor(DANGER if vurgu else INK)
+            c.setFont(REPORT_FONT_BOLD, 10)
+            c.drawRightString(R - 3 * mm, y, money(tutar))
+        y -= rh
 
-    c.setStrokeColor(ink)
-    c.setLineWidth(1.2)
-    c.line(18 * mm, y + 5 * mm, W - 18 * mm, y + 5 * mm)
-    c.setLineWidth(1)
-    c.setFillColor(ink)
-    c.setFont(REPORT_FONT_BOLD, 11)
-    c.drawString(18 * mm, y, "TOPLAM")
-    c.setFont(REPORT_FONT, 9)
-    c.setFillColor(muted)
-    c.drawString(48 * mm, y, f"{row['active_kwh']:,.1f} kWh")
+    c.setFillColor(INK)
+    c.roundRect(L, y - 6 * mm, CW, 10 * mm, 1.5 * mm, stroke=0, fill=1)
+    c.setFillColor(colors.white)
+    c.setFont(REPORT_FONT_BOLD, 10)
+    c.drawString(L + 4 * mm, y - 2.6 * mm, "TOPLAM")
+    c.setFont(REPORT_FONT, 8.5)
+    c.drawString(L + 38 * mm, y - 2.6 * mm, f"{kwh(row['active_kwh'])} kWh")
     if priced:
-        c.setFillColor(ink)
         c.setFont(REPORT_FONT_BOLD, 12)
-        c.drawRightString(W - 18 * mm, y, money(row["total_cost"]))
-    y -= 6 * mm
+        c.drawRightString(R - 3 * mm, y - 3 * mm, money(row["total_cost"]))
+    y -= 14 * mm
 
     if not priced:
-        c.setFillColor(muted)
-        c.setFont(REPORT_FONT, 8.5)
-        c.drawString(18 * mm, y,
-                     "Tutarlar için panelden tarife bilgilerinizi girin; bu rapor tüketim kırılımını gösteriyor.")
-        y -= 6 * mm
+        c.setFillColor(MUTED)
+        c.setFont(REPORT_FONT, 8)
+        c.drawString(L, y, "Tutarlar için panelden tarife bilgilerinizi girin; "
+                           "bu rapor tüketim kırılımını gösteriyor.")
+        y -= 7 * mm
 
-    # --- Gunluk tuketim grafigi ---
-    y -= 8 * mm
-    c.setFillColor(ink)
-    c.setFont(REPORT_FONT_BOLD, 12)
-    c.drawString(18 * mm, y, "Günlük Tüketim")
-    y -= 4 * mm
-
-    chart_h = 32 * mm
-    chart_w = W - 36 * mm
-    chart_bottom = y - chart_h
+    # ---------------- Günlük tüketim ----------------
+    y = _page_break(c, ctx, y, 45)
+    y = _section_title(c, "Günlük Tüketim", L, y, INK, INDIGO)
+    chart_h = 24 * mm
+    panel_top = y + 3 * mm
+    c.setFillColor(BG)
+    c.roundRect(L, panel_top - chart_h - 9 * mm, CW, chart_h + 9 * mm, 2 * mm, stroke=0, fill=1)
+    base = panel_top - chart_h - 4 * mm
     if daily:
         peak = max(v for _, v in daily) or 1.0
-        bar_w = chart_w / max(len(daily), 1)
+        # Yatay kılavuz çizgileri
+        c.setStrokeColor(BORDER)
+        c.setLineWidth(0.4)
+        for f in (0.5, 1.0):
+            c.line(L + 3 * mm, base + chart_h * f, R - 3 * mm, base + chart_h * f)
+        bw = (CW - 6 * mm) / max(len(daily), 1)
         for i, (gun, val) in enumerate(daily):
             h = (val / peak) * chart_h if peak > 0 else 0
-            c.setFillColor(colors.HexColor("#C97A2B"))
-            c.rect(18 * mm + i * bar_w + bar_w * 0.15, chart_bottom,
-                   bar_w * 0.7, max(h, 0.2), stroke=0, fill=1)
-        c.setStrokeColor(line)
-        c.line(18 * mm, chart_bottom, W - 18 * mm, chart_bottom)
-        c.setFillColor(muted)
-        c.setFont(REPORT_FONT, 7)
-        c.drawString(18 * mm, chart_bottom - 4 * mm, daily[0][0].strftime("%d.%m"))
-        c.drawRightString(W - 18 * mm, chart_bottom - 4 * mm, daily[-1][0].strftime("%d.%m"))
-        c.drawRightString(W - 18 * mm, chart_bottom + chart_h - 2 * mm, f"en yüksek {peak:,.1f} kWh")
+            c.setFillColor(AMBER if val > 0 else BORDER)
+            c.rect(L + 3 * mm + i * bw + bw * 0.2, base, bw * 0.6, max(h, 0.3), stroke=0, fill=1)
+        c.setStrokeColor(colors.HexColor("#CBD5E1"))
+        c.setLineWidth(0.7)
+        c.line(L + 3 * mm, base, R - 3 * mm, base)
+        c.setFillColor(MUTED)
+        c.setFont(REPORT_FONT, 6.5)
+        c.drawString(L + 3 * mm, base - 4 * mm, daily[0][0].strftime("%d.%m"))
+        c.drawRightString(R - 3 * mm, base - 4 * mm, daily[-1][0].strftime("%d.%m"))
+        c.drawRightString(R - 3 * mm, base + chart_h + 1.5 * mm, f"en yüksek gün: {kwh(peak)} kWh")
     else:
-        c.setFillColor(muted)
+        c.setFillColor(MUTED)
         c.setFont(REPORT_FONT, 9)
-        c.drawString(18 * mm, chart_bottom + chart_h / 2, "Bu dönemde günlük tüketim verisi yok.")
-    y = chart_bottom - 12 * mm
+        c.drawString(L + 4 * mm, base + chart_h / 2, "Bu dönemde günlük tüketim verisi yok.")
+    y = base - 10 * mm
 
-    # --- Oneriler ---
-    c.setFillColor(ink)
-    c.setFont(REPORT_FONT_BOLD, 12)
-    c.drawString(18 * mm, y, "Bu Dönemde Dikkat Edilmesi Gerekenler")
-    y -= 3 * mm
-
-    tip_style = ParagraphStyle(
-        "tip", fontName=REPORT_FONT, fontSize=9, leading=13, textColor=ink)
+    # ---------------- Öneriler ----------------
+    y = _page_break(c, ctx, y, 30)
+    y = _section_title(c, "Bu Dönemde Dikkat Edilmesi Gerekenler", L, y, INK, TEAL)
+    tip_style = ParagraphStyle("tip", fontName=REPORT_FONT, fontSize=8.5,
+                               leading=12, textColor=INK)
     for tip in _report_recommendations(row, reactive, tariff):
-        para = Paragraph("• " + tip, tip_style)
-        _, ph = para.wrap(W - 40 * mm, 40 * mm)
-        y -= ph + 3 * mm
-        para.drawOn(c, 20 * mm, y)
-    y -= 8 * mm
+        para = Paragraph(tip, tip_style)
+        _, ph = para.wrap(CW - 8 * mm, 40 * mm)
+        y = _page_break(c, ctx, y, ph / mm + 6)
+        c.setFillColor(TEAL)
+        c.rect(L, y - ph + 1 * mm, 1 * mm, ph + 1 * mm, stroke=0, fill=1)
+        para.drawOn(c, L + 5 * mm, y - ph + 1 * mm)
+        y -= ph + 4 * mm
 
-    # --- Alarm ozeti ---
-    c.setFillColor(ink)
-    c.setFont(REPORT_FONT_BOLD, 12)
-    c.drawString(18 * mm, y, "Alarm Özeti")
-    y -= 7 * mm
+    # ---------------- Alarm özeti ----------------
+    y -= 2 * mm
+    y = _page_break(c, ctx, y, 20)
+    y = _section_title(c, "Alarm Özeti", L, y, INK, DANGER)
     if alarms:
-        c.setFont(REPORT_FONT, 9)
+        c.setFont(REPORT_FONT, 8.5)
         for a in alarms:
-            if y < 20 * mm:
-                break
-            c.setFillColor(danger if a["open"] else muted)
-            c.drawString(20 * mm, y, ("● " if a["open"] else "○ ") + a["message"][:78])
-            c.setFillColor(muted)
-            c.drawRightString(W - 18 * mm, y, f"{a['count']} kez" + (" · sürüyor" if a["open"] else ""))
+            y = _page_break(c, ctx, y, 10)
+            c.setFillColor(DANGER if a["open"] else colors.HexColor("#94A3B8"))
+            c.circle(L + 1.5 * mm, y + 1 * mm, 1.2 * mm, stroke=0, fill=a["open"])
+            if not a["open"]:
+                c.setStrokeColor(colors.HexColor("#94A3B8"))
+                c.setLineWidth(0.6)
+                c.circle(L + 1.5 * mm, y + 1 * mm, 1.2 * mm, stroke=1, fill=0)
+            c.setFillColor(INK if a["open"] else MUTED)
+            c.drawString(L + 5 * mm, y, a["message"][:76])
+            c.setFillColor(MUTED)
+            c.setFont(REPORT_FONT, 7.5)
+            c.drawRightString(R, y, f"{a['count']} kez" + (" · sürüyor" if a["open"] else ""))
+            c.setFont(REPORT_FONT, 8.5)
             y -= 6 * mm
     else:
-        c.setFillColor(accent)
-        c.setFont(REPORT_FONT, 9)
-        c.drawString(20 * mm, y, "Bu dönemde alarm oluşmadı.")
-        y -= 6 * mm
+        c.setFillColor(TEAL)
+        c.setFont(REPORT_FONT, 8.5)
+        c.drawString(L, y, "Bu dönemde alarm oluşmadı.")
 
-    # --- Dipnot ---
-    c.setFillColor(muted)
-    c.setFont(REPORT_FONT, 7.5)
-    c.drawString(18 * mm, 12 * mm,
-                 "Tutarlar panelde girilen tarife bilgilerine göre hesaplanmış tahminlerdir; "
-                 "resmi fatura yerine geçmez.")
-    c.drawRightString(W - 18 * mm, 12 * mm, "Binary Enerji")
-
+    _report_footer(c, W, L, R, INK, MUTED, AMBER)
     c.save()
     return buf.getvalue()
+
+
+# Alt bilgi seridinin ustunde birakilan guvenli bosluk (mm).
+REPORT_BOTTOM_MARGIN = 22
+
+
+def _page_break(c, ctx, y, needed_mm: float):
+    """Kalan yer yetmiyorsa yeni sayfa acar ve yeni y konumunu doner.
+
+    Rapor icerigi (alarm sayisi, oneri uzunlugu) donemden doneme degistigi
+    icin sabit yerlesim guvenli degil -- ilk tasarimda alarm ozeti sayfaya
+    sigmayip sessizce kesilmisti. Artik kesilmek yerine tasiyor.
+    """
+    from reportlab.lib import colors
+    from reportlab.lib.units import mm
+    if y - needed_mm * mm > REPORT_BOTTOM_MARGIN * mm:
+        return y
+
+    _report_footer(c, ctx["W"], ctx["L"], ctx["R"], ctx["INK"], ctx["MUTED"], ctx["AMBER"])
+    c.showPage()
+
+    W, H, L, R = ctx["W"], ctx["H"], ctx["L"], ctx["R"]
+    band = 16 * mm
+    c.setFillColor(ctx["INK"])
+    c.rect(0, H - band, W, band, stroke=0, fill=1)
+    c.setFillColor(ctx["AMBER"])
+    c.rect(0, H - band, W, 1 * mm, stroke=0, fill=1)
+    logo = _logo_reader(white=True)
+    if logo is not None:
+        c.drawImage(logo, L, H - 11.5 * mm, width=6 * mm, height=6 * mm, mask="auto")
+    c.setFillColor(colors.white)
+    c.setFont(REPORT_FONT_BOLD, 8)
+    c.drawString(L + 8 * mm, H - 9.5 * mm, "BINARY ENERJİ")
+    c.setFillColor(colors.Color(1, 1, 1, alpha=0.6))
+    c.setFont(REPORT_FONT, 7.5)
+    c.drawRightString(R, H - 9.5 * mm,
+                      f"{ctx['device_name']} · {ctx['period']}")
+    return H - band - 12 * mm
+
+
+def _section_title(c, text: str, L, y, ink, accent):
+    """Renkli kucuk aksan cubugu + baslik. Yeni y konumunu doner."""
+    from reportlab.lib.units import mm
+    c.setFillColor(accent)
+    c.rect(L, y - 0.5 * mm, 3.5 * mm, 3.5 * mm, stroke=0, fill=1)
+    c.setFillColor(ink)
+    c.setFont(REPORT_FONT_BOLD, 11)
+    c.drawString(L + 6 * mm, y, text)
+    return y - 9 * mm
+
+
+def _report_footer(c, W, L, R, ink, muted, accent):
+    from reportlab.lib.units import mm
+    c.setFillColor(ink)
+    c.rect(0, 0, W, 14 * mm, stroke=0, fill=1)
+    c.setFillColor(accent)
+    c.rect(0, 14 * mm, W, 0.8 * mm, stroke=0, fill=1)
+    logo = _logo_reader(white=True)
+    if logo is not None:
+        c.drawImage(logo, L, 4.5 * mm, width=5.5 * mm, height=5.5 * mm, mask="auto")
+    from reportlab.lib import colors as _c
+    c.setFillColor(_c.white)
+    c.setFont(REPORT_FONT_BOLD, 7.5)
+    c.drawString(L + 7.5 * mm, 6.5 * mm, "BINARY ENERJİ")
+    c.setFillColor(_c.Color(1, 1, 1, alpha=0.55))
+    c.setFont(REPORT_FONT, 6.5)
+    c.drawString(L + 7.5 * mm, 3.5 * mm, "binaryenerji.com")
+    c.drawRightString(R, 5 * mm,
+                      "Tutarlar panelde girilen tarife bilgilerine göre hesaplanmış "
+                      "tahminlerdir; resmî fatura yerine geçmez.")
 
 
 @app.get("/reports/monthly-pdf")
