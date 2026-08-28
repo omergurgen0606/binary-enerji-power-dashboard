@@ -748,9 +748,23 @@ paylaşım sayfası; Android'de aynısı **FileProvider** ile (Android N'den ber
 tanımlı değildi, eklenmeseydi derleme geçer ama butona basıldığı anda
 uygulama çökerdi).
 
+**Tasarım (28 Ağustos 2026, aynı gün):** İlk sürüm işlevseldi ama sade. Lacivert
+başlık şeridi + logo + marka paleti eklendi; sayfayı taşıyan öğe **fatura bileşim
+çubuğu** — faturanın neyden oluştuğunu tek bakışta gösteriyor (test verisinde
+%57'si ceza). İlk render iki hata ortaya çıkardı: (1) alarm özeti sayfa dolunca
+**sessizce kesiliyordu** — rapor uzunluğu alarm sayısına göre değiştiği için
+sabit yerleşim güvenli değil; bölümler artık kalan yeri kontrol edip gerekirse
+ikinci sayfaya taşıyor, (2) etiketler "TÜKETIM" yazıyordu — Python'un `upper()`'ı
+Türkçe i→İ dönüşümünü yapmıyor, etiketler doğrudan büyük harf yazıldı.
+
 **Doğrulama:** PDF Türkçe karakterlerle ve panelle birebir aynı rakamlarla
 üretiliyor; toplu gönderim alıcıları doğru çözüyor (cihazı olmayan kullanıcı
 atlanıyor); Android'de paylaşım sayfası doğru dosya adıyla açılıyor, çökme yok.
+Üç durum da tek sayfaya sığıyor: tarifeli cihaz, tarifesiz cihaz, verisi olmayan
+dönem. **Gerçek gönderim uçtan uca doğrulandı** (28 Ağustos 2026): cron'un
+kullandığı `ops/monthly_report.sh` ile Ağustos raporu gönderildi
+(`sent: 1, skipped: 1, failed: 0`), kullanıcı e-postanın ulaştığını ve 3 PDF
+ekinin de açıldığını teyit etti.
 
 ---
 
