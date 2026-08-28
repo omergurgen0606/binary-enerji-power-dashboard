@@ -641,7 +641,7 @@ function EmailPrefToggle({ token, path, enabled, title, description, onLabel, on
   );
 }
 
-function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChange }) {
+function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChange, subscription }) {
   const [profile, setProfile] = useState(null);
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -725,6 +725,10 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
               <PushToggle token={token} />
+            </div>
+
+            <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
+              <SubscriptionCard subscription={subscription} />
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
@@ -948,6 +952,267 @@ function formatSilence(minutes) {
   return `${Math.floor(hours / 24)} gün`;
 }
 
+// ---------- Abonelik ----------
+const SUB_LABELS = {
+  trial: 'Deneme Sürümü',
+  active: 'Aktif',
+  expired: 'Süresi Doldu',
+  cancelled: 'İptal Edildi',
+  none: 'Abonelik Yok',
+};
+
+function formatSubDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('tr-TR', { day: '2-digit', month: 'long', year: 'numeric' });
+}
+
+// Panelin üstünde görünen şerit. Sadece dikkat gerektiren durumlarda çıkar:
+// aktif ve süresi bol olan abonelikte hiçbir şey göstermiyoruz.
+function SubscriptionBanner({ subscription }) {
+  if (!subscription) return null;
+  const { status, active, days_left: daysLeft, valid_until: validUntil, warn } = subscription;
+  if (active && !warn) return null;
+
+  const kritik = !active;
+  const renk = kritik ? 'var(--danger)' : 'var(--warn)';
+  return (
+    <div style={{
+      padding: '12px 16px', borderRadius: 'var(--radius-sm)', marginBottom: 16,
+      background: `color-mix(in srgb, ${renk} 10%, transparent)`,
+      border: `1px solid color-mix(in srgb, ${renk} 40%, var(--border))`,
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: renk, marginBottom: 4 }}>
+        {kritik ? 'Aboneliğiniz sona erdi' : `Aboneliğiniz ${daysLeft} gün sonra sona eriyor`}
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--ink)' }}>
+        {kritik
+          ? 'Cihazlarınız veri göndermeye devam ediyor ve geçmişiniz korunuyor — yalnızca panel erişimi kapalı. Yeniden açmak için bizimle iletişime geçin.'
+          : `Bitiş tarihi: ${formatSubDate(validUntil)}. Kesintisiz devam için yenilemeniz yeterli.`}
+      </div>
+      {status === 'trial' && active && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>
+          Deneme sürümünü kullanıyorsunuz.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SubscriptionCard({ subscription }) {
+  if (!subscription) return null;
+  const { status, active, valid_until: validUntil, device_count: deviceCount,
+          device_limit: deviceLimit, device_price: devicePrice, period } = subscription;
+  const renk = active ? 'var(--accent)' : 'var(--danger)';
+
+  return (
+    <div>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>Abonelik</div>
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <ReactiveStat label="Durum" value={SUB_LABELS[status] || status} danger={!active} />
+        <ReactiveStat label="Geçerlilik" value={formatSubDate(validUntil)} />
+        <ReactiveStat
+          label="Cihaz"
+          value={deviceLimit ? `${deviceCount} / ${deviceLimit}` : String(deviceCount ?? '—')}
+          hint={deviceLimit ? 'limit' : 'limitsiz'}
+        />
+        {devicePrice > 0 && (
+          <ReactiveStat
+            label="Ücret"
+            value={money(deviceCount * devicePrice)}
+            hint={`${money(devicePrice)} × ${deviceCount} cihaz · ${period === 'monthly' ? 'aylık' : 'yıllık'}`}
+          />
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, lineHeight: 1.5 }}>
+        Abonelik sona erse bile cihazlarınız veri göndermeye devam eder ve geçmişiniz silinmez;
+        yalnızca panel erişimi kapanır. Yenileme için bizimle iletişime geçin.
+      </div>
+      <div style={{ fontSize: 11, color: renk, marginTop: 6, fontWeight: 600 }}>
+        {active ? 'Erişiminiz açık.' : 'Panel erişimi kapalı.'}
+      </div>
+    </div>
+  );
+}
+
+// Yönetici paneli: fatura/havale ile çalışıldığı için abonelikler elle açılıyor.
+function AdminSubscriptions({ token }) {
+  const [rows, setRows] = useState(null);
+  const [error, setError] = useState('');
+  const [duzenlenen, setDuzenlenen] = useState(null);
+
+  function load() {
+    axios.get(`${API_BASE}/admin/subscriptions`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setRows(res.data))
+      .catch(() => setError('Abonelikler yüklenemedi.'));
+  }
+  useEffect(load, [token]);
+
+  if (error) return <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>;
+  if (rows === null) return <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>;
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, minWidth: 720 }}>
+        <thead>
+          <tr style={{ color: 'var(--muted)', textAlign: 'right' }}>
+            <th style={{ textAlign: 'left', padding: '6px 8px' }}>Organizasyon</th>
+            <th style={{ padding: '6px 8px' }}>Durum</th>
+            <th style={{ padding: '6px 8px' }}>Geçerlilik</th>
+            <th style={{ padding: '6px 8px' }}>Cihaz</th>
+            <th style={{ padding: '6px 8px' }}>Birim</th>
+            <th style={{ padding: '6px 8px' }}>Tutar</th>
+            <th style={{ padding: '6px 8px' }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.organization_id} style={{ borderTop: '1px solid var(--border)' }}>
+              <td style={{ padding: '7px 8px', fontWeight: 500 }}>{r.name}</td>
+              <td style={{
+                padding: '7px 8px', textAlign: 'right', fontWeight: 600,
+                color: r.active ? 'var(--accent)' : 'var(--danger)',
+              }}>{SUB_LABELS[r.status] || r.status}</td>
+              <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>
+                {formatSubDate(r.valid_until)}
+              </td>
+              <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>
+                {r.device_limit ? `${r.device_count}/${r.device_limit}` : r.device_count}
+              </td>
+              <td className="mono" style={{ padding: '7px 8px', textAlign: 'right' }}>
+                {r.device_price > 0 ? money(r.device_price) : '—'}
+              </td>
+              <td className="mono" style={{ padding: '7px 8px', textAlign: 'right', fontWeight: 600 }}>
+                {r.amount > 0 ? money(r.amount) : '—'}
+              </td>
+              <td style={{ padding: '7px 8px', textAlign: 'right' }}>
+                <button type="button" onClick={() => setDuzenlenen(r)} style={{
+                  padding: '4px 10px', borderRadius: 'var(--radius-xs)',
+                  border: '1px solid var(--border)', background: 'var(--surface)',
+                  color: 'var(--muted)', fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                }}>Düzenle</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {duzenlenen && (
+        <SubscriptionEditor
+          token={token} row={duzenlenen}
+          onClose={() => setDuzenlenen(null)}
+          onSaved={() => { setDuzenlenen(null); load(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function SubscriptionEditor({ token, row, onClose, onSaved }) {
+  const [form, setForm] = useState({
+    status: row.active ? row.status : 'active',
+    months: 12,
+    device_price: row.device_price || 0,
+    period: row.period || 'yearly',
+    device_limit: row.device_limit ?? '',
+    note: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const field = {
+    width: '100%', padding: '8px 10px', borderRadius: 'var(--radius-xs)',
+    border: '1px solid var(--border)', background: 'var(--surface)',
+    color: 'var(--ink)', fontSize: 13, fontFamily: 'inherit',
+  };
+  const labelStyle = { fontSize: 11, color: 'var(--muted)', display: 'block', marginBottom: 4 };
+
+  async function save() {
+    setSaving(true); setError('');
+    try {
+      await axios.put(`${API_BASE}/admin/subscriptions/${row.organization_id}`, {
+        status: form.status,
+        months: form.status === 'cancelled' ? null : Number(form.months),
+        device_price: Number(form.device_price),
+        period: form.period,
+        device_limit: form.device_limit === '' ? null : Number(form.device_limit),
+        note: form.note || null,
+      }, { headers: { Authorization: `Bearer ${token}` } });
+      onSaved();
+    } catch (e) {
+      setError(e.response?.data?.detail || 'Kaydedilemedi.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      marginTop: 16, padding: 16, borderRadius: 'var(--radius-sm)',
+      border: '1px dashed var(--border)', background: 'var(--bg)',
+    }}>
+      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{row.name}</div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
+        {row.device_count} cihaz · Süre uzatma mevcut bitiş tarihinin üzerine eklenir,
+        kalan süre yanmaz.
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12 }}>
+        <div>
+          <label style={labelStyle}>Durum</label>
+          <select style={field} value={form.status}
+                  onChange={(e) => setForm({ ...form, status: e.target.value })}>
+            <option value="active">Aktif</option>
+            <option value="trial">Deneme</option>
+            <option value="cancelled">İptal</option>
+          </select>
+        </div>
+        {form.status !== 'cancelled' && (
+          <div>
+            <label style={labelStyle}>Süre uzatma (ay)</label>
+            <input style={field} type="number" min="1" max="120" value={form.months}
+                   onChange={(e) => setForm({ ...form, months: e.target.value })} />
+          </div>
+        )}
+        <div>
+          <label style={labelStyle}>Cihaz başına ücret (₺)</label>
+          <input style={field} type="number" step="0.01" value={form.device_price}
+                 onChange={(e) => setForm({ ...form, device_price: e.target.value })} />
+        </div>
+        <div>
+          <label style={labelStyle}>Dönem</label>
+          <select style={field} value={form.period}
+                  onChange={(e) => setForm({ ...form, period: e.target.value })}>
+            <option value="yearly">Yıllık</option>
+            <option value="monthly">Aylık</option>
+          </select>
+        </div>
+        <div>
+          <label style={labelStyle}>Cihaz limiti (boş = limitsiz)</label>
+          <input style={field} type="number" min="0" value={form.device_limit}
+                 onChange={(e) => setForm({ ...form, device_limit: e.target.value })} />
+        </div>
+        <div style={{ gridColumn: '1 / -1' }}>
+          <label style={labelStyle}>Not (fatura no, mutabakat vb.)</label>
+          <input style={field} value={form.note}
+                 onChange={(e) => setForm({ ...form, note: e.target.value })} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 12, alignItems: 'center' }}>
+        <button type="button" onClick={save} disabled={saving} style={{
+          padding: '8px 16px', borderRadius: 'var(--radius-xs)', border: 'none',
+          background: 'var(--accent)', color: '#fff', fontSize: 12, fontWeight: 600,
+          cursor: saving ? 'default' : 'pointer',
+        }}>{saving ? 'Kaydediliyor…' : 'Kaydet'}</button>
+        <button type="button" onClick={onClose} style={{
+          padding: '8px 16px', borderRadius: 'var(--radius-xs)',
+          border: '1px solid var(--border)', background: 'var(--surface)',
+          color: 'var(--muted)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+        }}>Vazgeç</button>
+        {error && <span style={{ fontSize: 12, color: 'var(--danger)' }}>{error}</span>}
+      </div>
+    </div>
+  );
+}
+
 function FleetPage({ token, onBack }) {
   const [fleet, setFleet] = useState(null);
   const [error, setError] = useState('');
@@ -1085,6 +1350,18 @@ function FleetPage({ token, onBack }) {
                 </div>
               ))}
             </div>
+          </div>
+
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-md)', padding: 20, marginTop: 24,
+          }}>
+            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Abonelikler</div>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>
+              Abonelikler fatura/havale ile ödendiği için buradan elle açılır. Her değişiklik
+              denetim kaydına yazılır.
+            </div>
+            <AdminSubscriptions token={token} />
           </div>
         </>
       )}
@@ -1765,7 +2042,7 @@ function DeviceGroups({ devices, onSelect }) {
   );
 }
 
-function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, onOpenOrganization, isAdmin, token, onDeviceAdded }) {
+function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, onOpenOrganization, isAdmin, token, onDeviceAdded, subscription }) {
   const [showAddForm, setShowAddForm] = useState(devices.length === 0);
 
   return (
@@ -1795,6 +2072,7 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, o
       <img src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
       <div style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1, marginBottom: 4, textAlign: 'center' }}>BINARY ENERJİ</div>
       <h1 style={{ margin: '0 0 24px', fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, textAlign: 'center' }}>Cihazlarım</h1>
+      <SubscriptionBanner subscription={subscription} />
       <div style={{
         background: 'var(--surface)', border: '1px solid var(--border)',
         borderRadius: "var(--radius-md)", padding: 24,
@@ -3999,7 +4277,7 @@ function PhasorDiagram({ latest, energy, firmware }) {
   );
 }
 
-function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
+function DeviceDashboard({ token, device, onBack, onLogout, theme, subscription }) {
   const [connected, setConnected] = useState(false);
   const [lastMessageAt, setLastMessageAt] = useState(null);
   const [esp32Status, setEsp32Status] = useState(null); // 'online' | 'offline' | null (henüz bilinmiyor)
@@ -4165,6 +4443,8 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
           </button>
         </div>
       </header>
+
+      <SubscriptionBanner subscription={subscription} />
 
       {theme === 'faz-portresi' ? (
         <PhasorDiagram latest={latest} energy={energy} firmware={firmware} />
@@ -4408,6 +4688,7 @@ export default function App() {
   const [showAccount, setShowAccount] = useState(false);
   const [showFleet, setShowFleet] = useState(false);
   const [showOrganization, setShowOrganization] = useState(false);
+  const [subscription, setSubscription] = useState(null);
   const [role, setRole] = useState(null);
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_STORAGE_KEY) || 'klasik');
 
@@ -4454,6 +4735,9 @@ export default function App() {
     axios.get(`${API_BASE}/me`, { headers: { Authorization: `Bearer ${token}` } })
       .then((res) => setRole(res.data.role))
       .catch(() => {});
+    axios.get(`${API_BASE}/subscription`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setSubscription(res.data))
+      .catch(() => {});
   }, [token]);
 
   if (!token) {
@@ -4487,6 +4771,7 @@ export default function App() {
           deviceCount={devices?.length}
           theme={theme}
           onThemeChange={setTheme}
+          subscription={subscription}
         />
         <Footer />
       </>
@@ -4502,6 +4787,7 @@ export default function App() {
           onBack={() => setSelectedDevice(null)}
           onLogout={handleLogout}
           theme={theme}
+          subscription={subscription}
         />
         <Footer />
       </>
@@ -4520,6 +4806,7 @@ export default function App() {
         isAdmin={role === 'admin'}
         token={token}
         onDeviceAdded={refreshDevices}
+        subscription={subscription}
       />
       <Footer />
     </>
