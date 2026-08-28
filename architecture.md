@@ -495,6 +495,12 @@ Bölüm 5.7'nin devamı — yukarıdaki "flaşlanıp test edilmedi" notu artık 
 - **Deploy süreci:**
   1. `npm run build` (Mac'te, `power-dashboard` klasöründe) → `dist/` klasörü oluşur
   2. `scp -r dist/* root@138.68.83.111:/var/www/dashboard/` ile VPS'e kopyalanır
+     - **UYARI:** Hedef `/var/www/dashboard`'dır, `/root/dist` DEĞİL. `/root` altına
+       kopyalamak sessizce başarısız olur: dosyalar oraya gider ama nginx onları hiç
+       sunmaz (`www-data` `/root`'u okuyamıyor), site eski build'i sunmaya devam eder
+       ve "deploy edildi" sanılır. Bu hata 28 Ağustos 2026'da bir gün boyunca fark
+       edilmedi. Artık `ops/deploy_web.sh` kullanılmalı: doğru dizine kopyalar ve
+       canlı sitenin gerçekten yeni bundle'ı sunduğunu doğrulayıp aksi halde hata verir.
   3. Dosya sahipliği `www-data:www-data` olmalı (Nginx erişimi için)
 
 ## 8. Karşılaşılan Önemli Sorunlar ve Çözümleri (Gelecekte Faydalı Olabilir)
@@ -765,6 +771,44 @@ dönem. **Gerçek gönderim uçtan uca doğrulandı** (28 Ağustos 2026): cron'u
 kullandığı `ops/monthly_report.sh` ile Ağustos raporu gönderildi
 (`sent: 1, skipped: 1, failed: 0`), kullanıcı e-postanın ulaştığını ve 3 PDF
 ekinin de açıldığını teyit etti.
+
+
+### 5.14 Push Bildirimi — Web Push (28 Ağustos 2026)
+
+Alarmlar yalnızca e-posta ile gidiyordu; aşırı gerilim gibi bir olayda e-posta
+çok yavaş kalıyor.
+
+**Neden Web Push:** Native yolların ikisi de dış hesaba bağlı ve ikisi de yok —
+FCM için Firebase projesi, APNs için **ücretli** Apple Developer üyeliği gerekiyor
+(`DEVELOPMENT_TEAM` boş, `google-services.json` yok). Web Push hiçbir hesap
+gerektirmiyor; VAPID anahtarları sunucuda üretildi. Masaüstü tarayıcılarda ve
+Android Chrome'da doğrudan, iOS 16.4+'ta site ana ekrana eklenirse çalışıyor.
+
+**Tasarım:** `push_subscriptions` tablosunda yalnızca `webpush` kullanılıyor ama
+`transport` sütunu baştan genel — FCM/APNs eklendiğinde yeni bir satır tipi
+olacak, dağıtım mantığı değişmeyecek. Alıcılar `_ACCESSIBLE_DEVICES_SQL`
+üzerinden çözülüyor; sorgu tek bir kullanıcı adı bağladığı için korelasyonlu alt
+sorguya çevrilemiyor, bu yüzden kullanıcı başına çağrılıyor — kopyalanıp
+değiştirilseydi bildirim kapsamı panel kapsamından ayrışabilirdi.
+
+**Kapsam farkı (bilinçli):** Push, cihaza erişimi olan **herkese** gidiyor; alarm
+**e-postası** hâlâ yalnızca cihaz sahibine. E-postanın dar kapsamı organizasyon
+hiyerarşisinden önceki davranış ve ayrıca ele alınmalı.
+
+**Ölü abonelikler:** 404/410 dönen abonelik anında siliniyor (tarayıcı iptal
+etmiş demektir); diğer hatalar sayaç artırıyor ve beşte bir siliniyor.
+
+**Yakalanan tuzak:** `/sw.js` `text/html` olarak dönüyordu — nginx'in SPA
+yönlendirmesi (`try_files ... /index.html`) dosyayı yutuyordu. Service worker bu
+MIME tipiyle kaydolmaz. Asıl sebep dosyanın servis edilen dizinde hiç
+bulunmamasıydı; bkz. deploy uyarısı (bölüm 5 sonu).
+
+**Doğrulama:** Push servisi şifreli yükü ve VAPID imzasını kabul ediyor (kasten
+geçersiz token'a HTTP 410 dönmesi imzanın kabul edildiğini kanıtlıyor — reddedilse
+401/403 gelirdi); kapsam, cihaza erişimi olmayan kullanıcıyı dışarıda bırakıyor;
+410 temizliği aboneliği siliyor. Service worker canlı sitede `binaryenerji.com/`
+kapsamıyla kaydoluyor. **Gerçek bildirimin ekranda görünmesi kullanıcı testine
+bağlı** — başsız tarayıcıda bildirim izni verilemiyor.
 
 ---
 
