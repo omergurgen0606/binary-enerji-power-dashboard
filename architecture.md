@@ -791,9 +791,22 @@ olacak, dağıtım mantığı değişmeyecek. Alıcılar `_ACCESSIBLE_DEVICES_SQ
 sorguya çevrilemiyor, bu yüzden kullanıcı başına çağrılıyor — kopyalanıp
 değiştirilseydi bildirim kapsamı panel kapsamından ayrışabilirdi.
 
-**Kapsam farkı (bilinçli):** Push, cihaza erişimi olan **herkese** gidiyor; alarm
-**e-postası** hâlâ yalnızca cihaz sahibine. E-postanın dar kapsamı organizasyon
-hiyerarşisinden önceki davranış ve ayrıca ele alınmalı.
+**Kapsam (28 Ağustos 2026'da eşitlendi):** Her iki kanal da cihaza erişimi olan
+**herkese** gidiyor. Alarm e-postası eskiden yalnızca `devices.owner_username`'a
+gidiyordu — organizasyon hiyerarşisinden önceki davranıştı ve tesis/bölüm
+yöneticileri sorumlu oldukları cihazın alarmını hiç görmüyordu.
+
+Kullanıcı bazında erişim çözümü üç yerde tekrarlandığı için (aylık rapor, push,
+alarm e-postası) `users_with_device_access` yardımcısına çıkarıldı. Tesis
+yöneticisiyle test edilirken bir hata ortaya çıktı: birden fazla organizasyon
+üyeliği olan kullanıcı listeye iki kez giriyor ve aynı alarmı iki kez alacaktı —
+üyelik taraması `DISTINCT` yapıldı.
+
+Alıcı kapsamını genişletmek, hiç talep etmemiş kişilere e-posta göndermek
+demek olduğu için `alarm_email` tercihi eklendi (varsayılan açık,
+`monthly_report` ile aynı desen). Alıcılara **ayrı ayrı** gönderiliyor: aynı
+organizasyondaki kişilerin adreslerini birbirine göstermeye gerek yok ve bir
+gönderimin başarısız olması diğerlerini engellemiyor.
 
 **Ölü abonelikler:** 404/410 dönen abonelik anında siliniyor (tarayıcı iptal
 etmiş demektir); diğer hatalar sayaç artırıyor ve beşte bir siliniyor.
