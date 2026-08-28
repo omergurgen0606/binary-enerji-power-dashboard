@@ -1,0 +1,53 @@
+# Binary Enerji — otomatik testler.
+#
+# Şu an depoda uzak (remote) tanımlı değil, dolayısıyla bu iş akışı henüz
+# çalışmıyor. GitHub'a bir uzak depo eklendiği anda devreye girer; o zamana
+# kadar testler ops/test_calistir.sh ile elle çalıştırılıyor.
+#
+# CI ayrı bir PostgreSQL servisi kullanıyor: hiçbir koşulda üretim
+# veritabanına erişimi yok.
+name: Testler
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: binaryenerji_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 10s
+          --health-timeout 5s --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Bağımlılıklar
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Şema
+        env:
+          PGPASSWORD: test
+        run: psql -h localhost -U postgres -d binaryenerji_test -v ON_ERROR_STOP=1 -f ops/schema/00-baseline.sql
+
+      - name: Testler
+        env:
+          DB_HOST: localhost
+          POSTGRES_DB: binaryenerji_test
+          POSTGRES_PASSWORD: test
+        run: python -m pytest tests -q
