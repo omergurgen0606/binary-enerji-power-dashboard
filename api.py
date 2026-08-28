@@ -487,6 +487,8 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
     finally:
         cur.close()
         conn.close()
+    audit("device.add", actor=user, organization_id=membership["organization_id"],
+          entity_type="device", entity_id=device_id, detail={"ad": name})
     return {"message": "Cihaz eklendi"}
 
 
@@ -613,6 +615,7 @@ def change_password(payload: ChangePasswordRequest, user: str = Depends(require_
     cur.execute("UPDATE users SET password_hash = %s WHERE username = %s", (new_hash, user))
     cur.close()
     conn.close()
+    audit("account.password_change", actor=user)
     return {"message": "Şifre güncellendi"}
 
 
@@ -1286,6 +1289,8 @@ def update_member(member_id: int, payload: MemberRoleRequest, user: str = Depend
 
     cur.close()
     conn.close()
+    audit("member.update", actor=user, organization_id=membership["organization_id"],
+          entity_type="member", entity_id=member_id, detail={"yeni_rol": payload.role})
     return {"message": "Üye güncellendi"}
 
 
@@ -1311,6 +1316,8 @@ def remove_member(member_id: int, user: str = Depends(require_org_admin)):
     cur.execute("DELETE FROM org_members WHERE id = %s", (member_id,))
     cur.close()
     conn.close()
+    audit("member.remove", actor=user, organization_id=membership["organization_id"],
+          entity_type="member", entity_id=member_id)
     return {"message": "Üye çıkarıldı"}
 
 
@@ -1709,6 +1716,7 @@ def get_device_firmware(device_id: str, user: str = Depends(require_auth)):
 
 @app.post("/devices/{device_id}/ota")
 def trigger_ota(device_id: str, user: str = Depends(require_auth)):
+    audit("device.ota", actor=user, entity_type="device", entity_id=device_id)
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     check_rate_limit(f"ota:{user}", max_attempts=10, window_seconds=60 * 60)
@@ -2182,6 +2190,8 @@ def login(credentials: LoginRequest, request: Request):
     cur.close()
     conn.close()
     if not row or not bcrypt.checkpw(credentials.password.encode(), row[0].encode()):
+        audit("auth.login_failed", actor=credentials.username, request=request,
+              detail={"sebep": "hatalı kimlik bilgisi"})
         raise HTTPException(status_code=401, detail="Kullanıcı adı veya şifre hatalı")
     if not row[1]:
         raise HTTPException(status_code=403, detail="Hesabınız henüz doğrulanmadı, e-postanızı kontrol edin")
@@ -2617,6 +2627,8 @@ def publish_command(device_id: str, register: int, value: int = 1):
 
 @app.post("/devices/{device_id}/command")
 def send_device_command(device_id: str, payload: DeviceCommandRequest, user: str = Depends(require_auth)):
+    audit("device.command", actor=user, entity_type="device", entity_id=device_id,
+          detail={"komut": payload.command})
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     cmd = DEVICE_COMMANDS.get(payload.command)
@@ -2958,6 +2970,9 @@ def set_tariff(device_id: str, payload: TariffRequest, user: str = Depends(requi
     conn.commit()
     cur.close()
     conn.close()
+    audit("tariff.update", actor=user, entity_type="device", entity_id=device_id,
+          detail={"reaktif_fiyat": payload.reactive_price,
+                  "sozlesme_gucu": payload.contract_power_kw})
     return {"message": "Tarife ayarları kaydedildi"}
 
 
@@ -4420,6 +4435,277 @@ def set_nominal_voltage(device_id: str, payload: NominalVoltageRequest,
     cur.close()
     conn.close()
     return {"message": "Nominal gerilim kaydedildi"}
+
+# ---------- Denetim kaydı ----------
+# "Kim, ne zaman, neyi değiştirdi." Kurumsal müşterinin sorduğu ilk sorulardan
+# biri; ayrıca bir yanlışlık olduğunda geriye dönüp bakılacak tek yer.
+#
+# Denetim yazımı ASLA asıl işlemi düşürmemeli: bir kayıt tutulamadı diye
+# müşterinin cihaz eklemesi başarısız olamaz. Bu yüzden her çağrı kendi
+# try bloğunda ve hata yalnızca log'a düşüyor.
+
+def audit(action: str, actor: str | None = None, organization_id: int | None = None,
+          entity_type: str | None = None, entity_id: str | None = None,
+          detail: dict | None = None, request: Request | None = None,
+          cur=None) -> None:
+    """Denetim kaydı yazar.
+
+    cur verilirse ÇAĞIRANIN işlemine katılır -- kayıt ile işlem birlikte
+    commit olur, yani "yapıldı ama kaydedilmedi" durumu oluşmaz. Verilmezse
+    kendi bağlantısını açar.
+    """
+    ip = None
+    if request is not None:
+        try:
+            ip = (request.headers.get("x-real-ip")
+                  or request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+                  or (request.client.host if request.client else None))
+        except Exception:
+            ip = None
+
+    sql = """
+        INSERT INTO audit_log (actor, organization_id, action, entity_type, entity_id, detail, ip)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """
+    degerler = (actor, organization_id, action, entity_type,
+                str(entity_id) if entity_id is not None else None,
+                json.dumps(detail, ensure_ascii=False) if detail else None, ip)
+    try:
+        if cur is not None:
+            cur.execute(sql, degerler)
+            return
+        conn = db_connect()
+        c = conn.cursor()
+        try:
+            c.execute(sql, degerler)
+            conn.commit()
+        finally:
+            c.close()
+            conn.close()
+    except Exception as e:
+        # Denetim kaydı tutulamadı diye asıl işlem düşmemeli.
+        logger.error("Denetim kaydı yazılamadı (%s): %s", action, e)
+
+
+def _actor_org(username: str, cur) -> int | None:
+    cur.execute("SELECT organization_id FROM org_members WHERE username = %s LIMIT 1", (username,))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+AUDIT_LABELS = {
+    "device.add": "Cihaz eklendi",
+    "device.remove": "Cihaz silindi",
+    "device.rename": "Cihaz adı değiştirildi",
+    "device.move": "Cihaz taşındı",
+    "device.command": "Cihaza komut gönderildi",
+    "device.ota": "Firmware güncellemesi başlatıldı",
+    "device.ct_ratio": "Akım trafo oranı değiştirildi",
+    "tariff.update": "Tarife ayarları değiştirildi",
+    "alarm_rule.create": "Alarm kuralı eklendi",
+    "alarm_rule.delete": "Alarm kuralı silindi",
+    "alarm_rule.toggle": "Alarm kuralı açıldı/kapatıldı",
+    "facility.create": "Tesis eklendi",
+    "facility.delete": "Tesis silindi",
+    "department.create": "Bölüm eklendi",
+    "department.delete": "Bölüm silindi",
+    "member.update": "Üye yetkisi değiştirildi",
+    "member.remove": "Üye çıkarıldı",
+    "invite.create": "Davet gönderildi",
+    "invite.accept": "Davet kabul edildi",
+    "invite.cancel": "Davet iptal edildi",
+    "account.email_change": "E-posta değişikliği talep edildi",
+    "account.password_change": "Şifre değiştirildi",
+    "account.export": "Kişisel veriler dışa aktarıldı",
+    "account.delete": "Hesap silindi",
+    "subscription.update": "Abonelik güncellendi",
+    "auth.login_failed": "Başarısız giriş denemesi",
+}
+
+
+@app.get("/organization/audit")
+def get_audit_log(limit: int = 100, user: str = Depends(require_auth)):
+    """Organizasyonun denetim kaydı. Yalnızca organizasyon yöneticisi.
+
+    Kapsam organizasyona göre: bir müşteri başka müşterinin kaydını göremez.
+    """
+    membership = get_membership(user)
+    if not membership or membership["role"] != "org_admin":
+        raise HTTPException(status_code=403, detail="Bu kaydı yalnızca organizasyon yöneticisi görebilir")
+    limit = max(1, min(limit, 500))
+    conn = db_connect()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT at, actor, action, entity_type, entity_id, detail, ip
+        FROM audit_log WHERE organization_id = %s ORDER BY at DESC LIMIT %s
+    """, (membership["organization_id"], limit))
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [{
+        "at": r[0], "actor": r[1], "action": r[2],
+        "label": AUDIT_LABELS.get(r[2], r[2]),
+        "entity_type": r[3], "entity_id": r[4], "detail": r[5], "ip": r[6],
+    } for r in rows]
+
+
+# ---------- KVKK: veri dışa aktarma ve hesap silme ----------
+# KVKK madde 11, ilgili kişiye verilerinin akıbetini öğrenme, düzeltilmesini
+# ve silinmesini isteme hakkı veriyor. Bu iki uç nokta o hakları e-posta
+# yazışmasına gerek kalmadan kullanılabilir kılıyor.
+
+@app.get("/me/data-export")
+def export_my_data(user: str = Depends(require_auth), request: Request = None):
+    """Kullanıcıya ait kişisel verilerin tamamı, makine okunur biçimde.
+
+    Cihaz ÖLÇÜM verisi buraya dahil edilmiyor: o veri kişiye değil
+    organizasyona ait ve milyonlarca satır olabiliyor. Panelden Excel olarak
+    zaten indirilebiliyor.
+    """
+    conn = db_connect()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT username, first_name, last_name, email, phone, created_at,
+               is_verified, role, monthly_report, alarm_email, avatar_updated_at
+        FROM users WHERE username = %s
+    """, (user,))
+    u = cur.fetchone()
+    if not u:
+        cur.close(); conn.close()
+        raise HTTPException(status_code=404, detail="Kullanıcı bulunamadı")
+
+    veri = {
+        "hesap": {
+            "kullanici_adi": u[0], "ad": u[1], "soyad": u[2], "eposta": u[3],
+            "telefon": u[4], "kayit_tarihi": u[5].isoformat() if u[5] else None,
+            "eposta_dogrulandi": u[6], "rol": u[7],
+            "aylik_rapor_tercihi": u[8], "alarm_eposta_tercihi": u[9],
+            "profil_fotografi_var": u[10] is not None,
+        },
+    }
+
+    cur.execute("""
+        SELECT o.name, m.role FROM org_members m
+        JOIN organizations o ON o.id = m.organization_id WHERE m.username = %s
+    """, (user,))
+    veri["organizasyon_uyelikleri"] = [{"organizasyon": r[0], "rol": r[1]} for r in cur.fetchall()]
+
+    cur.execute("SELECT device_id, name, created_at FROM devices WHERE owner_username = %s", (user,))
+    veri["kayitli_cihazlar"] = [
+        {"cihaz_id": r[0], "ad": r[1], "eklenme": r[2].isoformat() if r[2] else None}
+        for r in cur.fetchall()]
+
+    cur.execute("SELECT transport, user_agent, created_at FROM push_subscriptions WHERE username = %s", (user,))
+    veri["bildirim_abonelikleri"] = [
+        {"tur": r[0], "cihaz": r[1], "olusturma": r[2].isoformat() if r[2] else None}
+        for r in cur.fetchall()]
+
+    cur.execute("""
+        SELECT at, action, entity_type, entity_id FROM audit_log
+        WHERE actor = %s ORDER BY at DESC LIMIT 1000
+    """, (user,))
+    veri["islem_gecmisi"] = [
+        {"zaman": r[0].isoformat(), "islem": AUDIT_LABELS.get(r[1], r[1]),
+         "nesne_turu": r[2], "nesne": r[3]} for r in cur.fetchall()]
+
+    veri["aciklama"] = (
+        "Bu dosya KVKK kapsamındaki kişisel verilerinizi içerir. Cihaz ölçüm "
+        "verileri organizasyona ait olduğu için burada yer almaz; panelden "
+        "Excel olarak indirilebilir."
+    )
+    veri["olusturma_zamani"] = datetime.now(timezone.utc).isoformat()
+
+    org_id = _actor_org(user, cur)
+    cur.close()
+    conn.close()
+    audit("account.export", actor=user, organization_id=org_id, request=request)
+
+    return Response(
+        content=json.dumps(veri, ensure_ascii=False, indent=2),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{user}-kisisel-veriler.json"'},
+    )
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str
+    confirm: str   # kullanıcı adını yazarak onaylama
+
+
+@app.post("/me/delete")
+def delete_my_account(payload: DeleteAccountRequest, user: str = Depends(require_auth),
+                      request: Request = None):
+    """Hesabı ve kişisel verileri siler (KVKK madde 11).
+
+    Cihazlar SILINMEZ: organizasyona ait donanım kayıtları ve ölçüm geçmişi
+    kişisel veri değil. Sahiplik aynı organizasyondaki başka bir yöneticiye
+    devredilir; devredilecek kimse yoksa silme reddedilir ve kullanıcıya önce
+    devretmesi söylenir -- sessizce cihazları öksüz bırakmak veya müşterinin
+    verisini silmek kabul edilemez.
+
+    Denetim kaydı SILINMEZ, anonimleştirilir: izin varlık sebebi kullanıcı
+    silinse de "ne oldu" sorusunu cevaplayabilmek.
+    """
+    if payload.confirm.strip() != user:
+        raise HTTPException(status_code=400, detail="Onay için kullanıcı adınızı doğru yazmalısınız")
+    check_rate_limit(f"delete:{user}", max_attempts=5, window_seconds=60 * 60)
+
+    conn = db_connect()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
+        row = cur.fetchone()
+        if not row or not bcrypt.checkpw(payload.password.encode(), row[0].encode()):
+            raise HTTPException(status_code=403, detail="Şifre hatalı")
+
+        org_id = _actor_org(user, cur)
+
+        cur.execute("SELECT count(*) FROM devices WHERE owner_username = %s", (user,))
+        cihaz_sayisi = cur.fetchone()[0]
+        devralan = None
+        if cihaz_sayisi:
+            cur.execute("""
+                SELECT m.username FROM org_members m
+                WHERE m.organization_id = %s AND m.role = 'org_admin' AND m.username <> %s
+                ORDER BY m.id LIMIT 1
+            """, (org_id, user))
+            r = cur.fetchone()
+            if not r:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Hesabınıza kayıtlı {cihaz_sayisi} cihaz var ve devredilecek başka bir "
+                           f"organizasyon yöneticisi yok. Önce bir yönetici davet edin, sonra silin.")
+            devralan = r[0]
+            cur.execute("UPDATE devices SET owner_username = %s WHERE owner_username = %s",
+                        (devralan, user))
+
+        # Denetim izi kalsın ama kişiyle ilişkilendirilemesin.
+        anonim = f"silinmiş-kullanıcı-{abs(hash(user)) % 100000}"
+        cur.execute("UPDATE audit_log SET actor = %s WHERE actor = %s", (anonim, user))
+
+        cur.execute("INSERT INTO deletion_requests (user_hash, note) VALUES (%s, %s)",
+                    (hashlib.sha256(user.encode()).hexdigest(),
+                     f"cihaz devri: {devralan}" if devralan else "cihaz yok"))
+
+        audit("account.delete", actor=anonim, organization_id=org_id,
+              detail={"devredilen_cihaz": cihaz_sayisi, "devralan": devralan},
+              request=request, cur=cur)
+
+        # org_members, push_subscriptions, org_invites CASCADE ile gidiyor.
+        cur.execute("DELETE FROM users WHERE username = %s", (user,))
+        conn.commit()
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error("Hesap silme hatasi (%s): %s", user, e)
+        raise HTTPException(status_code=500, detail="Hesap silinemedi")
+    finally:
+        cur.close()
+        conn.close()
+
+    return {"message": "Hesabınız ve kişisel verileriniz silindi."}
 
 # ---------- WebSocket: Canlı veri ----------
 connected_clients: list[tuple[WebSocket, str]] = []
