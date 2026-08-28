@@ -4478,6 +4478,36 @@ function PhasorDiagram({ latest, energy, firmware }) {
   );
 }
 
+const DASHBOARD_TABS = [
+  { key: 'canli', label: 'Canlı' },
+  { key: 'fatura', label: 'Fatura' },
+  { key: 'analiz', label: 'Analiz' },
+  { key: 'alarm', label: 'Alarmlar' },
+  { key: 'cihaz', label: 'Cihaz' },
+];
+
+function DashboardTabs({ active, onChange, alarmCount }) {
+  return (
+    <nav className="dash-tabs">
+      {DASHBOARD_TABS.map((t) => (
+        <button
+          key={t.key}
+          className="dash-tab"
+          onClick={() => onChange(t.key)}
+          aria-current={t.key === active ? 'page' : undefined}
+        >
+          {t.label}
+          {t.key === 'alarm' && alarmCount > 0 && (
+            <span className="dash-tab-badge" title={`${alarmCount} çözülmemiş alarm`}>
+              {alarmCount}
+            </span>
+          )}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
 function DeviceDashboard({ token, device, onBack, onLogout, theme, subscription }) {
   const [connected, setConnected] = useState(false);
   const [lastMessageAt, setLastMessageAt] = useState(null);
@@ -4487,7 +4517,7 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme, subscription 
   const [pulseKey, setPulseKey] = useState(0);
   const [clock, setClock] = useState(new Date());
   const [energy, setEnergy] = useState(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(true);
   const [ctRatio, setCtRatio] = useState(null);
   const [hourlyModal, setHourlyModal] = useState(null); // { title, suffix } | null
   const [stats, setStats] = useState(null);
@@ -4496,7 +4526,34 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme, subscription 
   const [harmonics, setHarmonics] = useState(null);
   const [deviceInfo, setDeviceInfo] = useState(null);
   const [firmware, setFirmware] = useState(null);
+  const [tab, setTab] = useState(() => {
+    try { return localStorage.getItem('dash-tab') || 'canli'; } catch { return 'canli'; }
+  });
+  const [alarmCount, setAlarmCount] = useState(0);
   const wsRef = useRef(null);
+
+  function selectTab(next) {
+    setTab(next);
+    try { localStorage.setItem('dash-tab', next); } catch { /* gizli sekme; yoksay */ }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // Alarm rozeti: sekme kapaliyken de cozulmemis alarm sayisi gorunmeli
+  useEffect(() => {
+    let cancelled = false;
+    function fetchAlarmCount() {
+      axios.get(`${API_BASE}/devices/${device.device_id}/alarm-events?limit=200`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((res) => {
+          if (!cancelled) setAlarmCount(res.data.filter((e) => !e.resolved_at).length);
+        })
+        .catch(() => { /* rozet kritik degil, sessizce gecs */ });
+    }
+    fetchAlarmCount();
+    const timer = setInterval(fetchAlarmCount, 30000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [device.device_id, token]);
 
   async function fetchFirmware() {
     try {
@@ -4647,118 +4704,141 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme, subscription 
 
       <SubscriptionBanner subscription={subscription} />
 
-      {theme === 'faz-portresi' ? (
-        <PhasorDiagram latest={latest} energy={energy} firmware={firmware} />
-      ) : theme === 'kadran-kumesi' ? (
-        <GaugeCluster latest={latest} firmware={firmware} />
-      ) : (
-        <>
-          <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
-            {PHASES.map((ph) => (
-              <PhaseCard
-                key={ph.key}
-                label={ph.label}
-                color={ph.color}
-                v={latest[`v${ph.key}`]}
-                i={latest[`i${ph.key}`]}
-                p={latest[`p${ph.key}`]}
-                q={latest[`q${ph.key}`]}
-                s={latest[`s${ph.key}`]}
-                pf={latest[`pf${ph.key}`]}
-                thd={latest[`thd${ph.key}`]}
-                thvd={latest[`thvd${ph.key}`]}
-                pulse={pulseKey}
-              />
-            ))}
-          </div>
+      <DashboardTabs active={tab} onChange={selectTab} alarmCount={alarmCount} />
 
-          <div style={{ display: 'flex', gap: 32, marginBottom: 24, fontSize: 14, flexWrap: 'wrap' }}>
-            <div>
-              <span style={{ color: 'var(--muted)' }}>Frekans: </span>
-              <span className="mono" style={{ fontWeight: 500 }}>{latest.f1 != null ? latest.f1.toFixed(2) : '—'} Hz</span>
+      {tab === 'canli' && (
+        <>
+        {theme === 'faz-portresi' ? (
+          <PhasorDiagram latest={latest} energy={energy} firmware={firmware} />
+        ) : theme === 'kadran-kumesi' ? (
+          <GaugeCluster latest={latest} firmware={firmware} />
+        ) : (
+          <>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 28, flexWrap: 'wrap' }}>
+              {PHASES.map((ph) => (
+                <PhaseCard
+                  key={ph.key}
+                  label={ph.label}
+                  color={ph.color}
+                  v={latest[`v${ph.key}`]}
+                  i={latest[`i${ph.key}`]}
+                  p={latest[`p${ph.key}`]}
+                  q={latest[`q${ph.key}`]}
+                  s={latest[`s${ph.key}`]}
+                  pf={latest[`pf${ph.key}`]}
+                  thd={latest[`thd${ph.key}`]}
+                  thvd={latest[`thvd${ph.key}`]}
+                  pulse={pulseKey}
+                />
+              ))}
             </div>
-            <div>
-              <span style={{ color: 'var(--muted)' }}>Nötr: </span>
-              <span className="mono" style={{ fontWeight: 500 }}>
-                {latest.vN != null ? latest.vN.toFixed(1) : '—'} V, {latest.iN != null ? latest.iN.toFixed(3) : '—'} A
-              </span>
+
+            <div style={{ display: 'flex', gap: 32, marginBottom: 24, fontSize: 14, flexWrap: 'wrap' }}>
+              <div>
+                <span style={{ color: 'var(--muted)' }}>Frekans: </span>
+                <span className="mono" style={{ fontWeight: 500 }}>{latest.f1 != null ? latest.f1.toFixed(2) : '—'} Hz</span>
+              </div>
+              <div>
+                <span style={{ color: 'var(--muted)' }}>Nötr: </span>
+                <span className="mono" style={{ fontWeight: 500 }}>
+                  {latest.vN != null ? latest.vN.toFixed(1) : '—'} V, {latest.iN != null ? latest.iN.toFixed(3) : '—'} A
+                </span>
+              </div>
             </div>
-          </div>
+          </>
+        )}
+
+        <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Gerilim &amp; Akım Dalga Formu</div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          {PHASES.map((ph) => (
+            <WaveformCard
+              key={ph.key}
+              label={ph.label}
+              color={ph.color}
+              v={latest[`v${ph.key}`]}
+              i={latest[`i${ph.key}`]}
+              cosPhi={latest[`cos${ph.key}`]}
+              q={latest[`q${ph.key}`]}
+            />
+          ))}
+        </div>
+
+        <div style={{ fontSize: 13, color: 'var(--muted)', margin: '24px 0 12px' }}>Toplam Enerji</div>
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <EnergyCard title="Tüketim" data={energy} suffix="tuketim" onClick={() => setHourlyModal({ title: 'Tüketim', suffix: 'tuketim' })} />
+          <EnergyCard title="Üretim" data={energy} suffix="uretim" onClick={() => setHourlyModal({ title: 'Üretim', suffix: 'uretim' })} />
+        </div>
+
         </>
       )}
 
-      <div style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 12 }}>Gerilim &amp; Akım Dalga Formu</div>
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        {PHASES.map((ph) => (
-          <WaveformCard
-            key={ph.key}
-            label={ph.label}
-            color={ph.color}
-            v={latest[`v${ph.key}`]}
-            i={latest[`i${ph.key}`]}
-            cosPhi={latest[`cos${ph.key}`]}
-            q={latest[`q${ph.key}`]}
-          />
-        ))}
-      </div>
+      {tab === 'fatura' && (
+        <>
+          <BillSection token={token} device={device} />
+          <ReactiveSection token={token} device={device} />
+          <DemandSection demand={demand} />
+          <TrendSection token={token} device={device} />
+        </>
+      )}
 
-      <div style={{ fontSize: 13, color: 'var(--muted)', margin: '24px 0 12px' }}>Toplam Enerji</div>
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-        <EnergyCard title="Tüketim" data={energy} suffix="tuketim" onClick={() => setHourlyModal({ title: 'Tüketim', suffix: 'tuketim' })} />
-        <EnergyCard title="Üretim" data={energy} suffix="uretim" onClick={() => setHourlyModal({ title: 'Üretim', suffix: 'uretim' })} />
-      </div>
+      {tab === 'analiz' && (
+        <>
+          <StatsSection stats={stats} theme={theme} />
+          <PowerQualitySection token={token} device={device} />
+          <HarmonicsSection harmonics={harmonics} />
+          <PeaksSection peaks={peaks} />
+        </>
+      )}
 
-      <TrendSection token={token} device={device} />
-      <BillSection token={token} device={device} />
-      <ReactiveSection token={token} device={device} />
-      <StatsSection stats={stats} theme={theme} />
-      <PeaksSection peaks={peaks} />
-      <DemandSection demand={demand} />
-      <HarmonicsSection harmonics={harmonics} />
-      <PowerQualitySection token={token} device={device} />
-      <AlarmsSection token={token} device={device} />
-      <DeviceInfoSection info={deviceInfo} />
+      {tab === 'alarm' && <AlarmsSection token={token} device={device} />}
 
-      <div style={{
-        background: 'var(--surface)', border: '1px solid var(--border)',
-        borderRadius: "var(--radius-md)", padding: 20, marginTop: 24,
-      }}>
-        <button
-          onClick={() => setSettingsOpen((o) => !o)}
-          style={{
-            display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            width: '100%', background: 'none', border: 'none', cursor: 'pointer',
-            fontSize: 13, color: 'var(--muted)', padding: 0,
-          }}
-        >
-          <span style={{ fontWeight: 600, color: 'var(--ink)' }}>Cihaz Ayarları</span>
-          <span>{settingsOpen ? '▲' : '▼'}</span>
-        </button>
-        {settingsOpen && (
-          <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <CtRatioBox token={token} device={device} ctRatio={ctRatio} onSaved={fetchCtRatio} />
-            <FirmwareBox token={token} device={device} firmware={firmware} onUpdated={fetchFirmware} />
-            {deviceInfo ? (
-              <>
-                <span style={{ fontSize: 13, fontWeight: 600, marginTop: 8 }}>Cihaz Komutları</span>
-                {DEVICE_COMMAND_LIST.map((cmd) => (
-                  <CommandRow key={cmd.key} token={token} device={device} cmd={cmd} />
-                ))}
-              </>
-            ) : (
-              <div style={{
-                padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
-                display: 'flex', flexDirection: 'column', gap: 4,
-              }}>
-                <span style={{ fontSize: 13, fontWeight: 600 }}>Enerji/Tepe Sıfırlama, Fabrika Ayarları, Yeniden Başlatma</span>
-                <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                  Bu işlemler cihazın ön panelinden yapılmalıdır — uzaktan güvenilir şekilde çalışmadığı için kaldırıldı. Panel menüleri: Enerji Sıfırlama (Ayarlar → Enerji Değerleri Silme), Tepe Değerleri (Ayarlar → Tepe Değerleri Resetleme), Fabrika Ayarları (Ayarlar → Fabrika Ayarları), Cihaz Resetleme (Ayarlar → Reset).
-                </span>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      {tab === 'cihaz' && (
+        <>
+          <DeviceInfoSection info={deviceInfo} />
+
+        <div style={{
+          background: 'var(--surface)', border: '1px solid var(--border)',
+          borderRadius: "var(--radius-md)", padding: 20, marginTop: 24,
+        }}>
+          <button
+            onClick={() => setSettingsOpen((o) => !o)}
+            style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              width: '100%', background: 'none', border: 'none', cursor: 'pointer',
+              fontSize: 13, color: 'var(--muted)', padding: 0,
+            }}
+          >
+            <span style={{ fontWeight: 600, color: 'var(--ink)' }}>Cihaz Ayarları</span>
+            <span>{settingsOpen ? '▲' : '▼'}</span>
+          </button>
+          {settingsOpen && (
+            <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <CtRatioBox token={token} device={device} ctRatio={ctRatio} onSaved={fetchCtRatio} />
+              <FirmwareBox token={token} device={device} firmware={firmware} onUpdated={fetchFirmware} />
+              {deviceInfo ? (
+                <>
+                  <span style={{ fontSize: 13, fontWeight: 600, marginTop: 8 }}>Cihaz Komutları</span>
+                  {DEVICE_COMMAND_LIST.map((cmd) => (
+                    <CommandRow key={cmd.key} token={token} device={device} cmd={cmd} />
+                  ))}
+                </>
+              ) : (
+                <div style={{
+                  padding: '10px 12px', borderRadius: "var(--radius-sm)", border: '1px solid var(--border)',
+                  display: 'flex', flexDirection: 'column', gap: 4,
+                }}>
+                  <span style={{ fontSize: 13, fontWeight: 600 }}>Enerji/Tepe Sıfırlama, Fabrika Ayarları, Yeniden Başlatma</span>
+                  <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+                    Bu işlemler cihazın ön panelinden yapılmalıdır — uzaktan güvenilir şekilde çalışmadığı için kaldırıldı. Panel menüleri: Enerji Sıfırlama (Ayarlar → Enerji Değerleri Silme), Tepe Değerleri (Ayarlar → Tepe Değerleri Resetleme), Fabrika Ayarları (Ayarlar → Fabrika Ayarları), Cihaz Resetleme (Ayarlar → Reset).
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        </>
+      )}
 
       {hourlyModal && (
         <HourlyEnergyModal
