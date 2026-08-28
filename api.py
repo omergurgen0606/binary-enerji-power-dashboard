@@ -3806,6 +3806,242 @@ def push_notify(device_id: str, title: str, body: str, tag: str | None = None) -
         logger.error("Push bildirimi gonderilemedi (%s): %s", device_id, e)
     return sent
 
+# ---------- Güç kalitesi (EN 50160) ----------
+# EN 50160, kamu dagitim sebekesinden saglanan gerilimin ozelliklerini tanimlar.
+# Butun sinirlarini 10 DAKIKALIK ortalama degerler uzerinden ve normalde bir
+# HAFTALIK gozlem penceresinde degerlendirir -- bu yuzden rapor measurements_10min
+# ozetinden okuyor (15 dakikalik ozet guc asimi icindir, buraya uymaz).
+#
+# ASAGIDAKI SINIRLAR STANDARDIN BENIM KODLAMAM. Resmi bir uygunluk belgesi
+# degildir; musteri kendi sebeke isletmecisinin sartlariyla teyit etmeli.
+#
+# DEGERLENDIRILMEYENLER (cihaz olcmedigi icin): flicker (Plt), tek tek harmonik
+# mertebeleri, gerilim dengesizligi (negatif bilesen), gerilim dusme/kesinti
+# olay sayimlari. Rapor bunlari acikca "degerlendirilmedi" diye listeliyor ki
+# eksiklik sessizce "uygun" gibi gorunmesin.
+
+EN50160_LIMITS = {
+    # Gerilim: 10 dk ortalamalarin %95'i Un ±%10 icinde, %100'u +%10/-%15 icinde.
+    "voltage_band_pct": (0.90, 1.10),
+    "voltage_band_required": 95.0,
+    "voltage_abs_band_pct": (0.85, 1.10),
+    # Frekans (senkron bagli sebeke): %99,5'i 50 Hz ±%1; %100'u +%4/-%6.
+    "frequency_band_hz": (49.5, 50.5),
+    "frequency_required": 99.5,
+    "frequency_abs_band_hz": (47.0, 52.0),
+    # Gerilim toplam harmonik bozulmasi: 10 dk ortalamalarin %95'i <= %8.
+    "thd_limit_pct": 8.0,
+    "thd_required": 95.0,
+}
+
+# Cihazin gercekten olcum yaptigi kovalari ayirt etmek icin. Besleme kesildiginde
+# de cihaz kapatildiginda da frekans ve gerilim sifira dusuyor; ikisini birbirinden
+# ayirt edemiyoruz, bu yuzden bu kovalar istatistige katilmiyor ve raporda ayrica
+# "olcum yok" olarak gosteriliyor.
+PQ_MIN_FREQUENCY = 45.0
+PQ_MAX_FREQUENCY = 55.0
+PQ_MIN_VOLTAGE = 50.0
+
+PQ_NOT_ASSESSED = [
+    ("Flicker (Plt)", "cihaz flickermetre içermiyor"),
+    ("Tek tek harmonik mertebeleri", "geçmişe dönük mertebe verisi tutulmuyor"),
+    ("Gerilim dengesizliği (negatif bileşen)", "cihaz negatif bileşeni raporlamıyor"),
+    ("Gerilim düşmesi / kesinti olay sayımları", "10 dk ortalama çözünürlüğü olay sayımına yetmiyor"),
+]
+
+
+def _pq_nominal_voltage(device_id: str, cur) -> float:
+    cur.execute("SELECT nominal_voltage FROM device_settings WHERE device_id = %s", (device_id,))
+    row = cur.fetchone()
+    return float(row[0]) if row and row[0] is not None else 230.0
+
+
+def _pq_intervals(device_id: str, since, cur) -> list[dict]:
+    cur.execute("""
+        SELECT bucket, avg_v1, avg_v2, avg_v3, min_v1, min_v2, min_v3,
+               max_v1, max_v2, max_v3, avg_f, min_f, max_f,
+               avg_thvd1, avg_thvd2, avg_thvd3
+        FROM measurements_10min
+        WHERE device_id = %s AND bucket >= %s
+        ORDER BY bucket
+    """, (device_id, since))
+    out = []
+    for r in cur.fetchall():
+        volt = [r[1], r[2], r[3]]
+        freq = r[10]
+        gecerli = (
+            freq is not None and PQ_MIN_FREQUENCY <= freq <= PQ_MAX_FREQUENCY
+            and any(v is not None and v >= PQ_MIN_VOLTAGE for v in volt)
+        )
+        out.append({
+            "bucket": r[0], "v": volt, "v_min": [r[4], r[5], r[6]], "v_max": [r[7], r[8], r[9]],
+            "f": freq, "f_min": r[11], "f_max": r[12],
+            "thvd": [r[13], r[14], r[15]],
+            "gecerli": gecerli,
+        })
+    return out
+
+
+def _pq_pct(sayac: int, toplam: int) -> float | None:
+    return round(sayac / toplam * 100, 2) if toplam else None
+
+
+def power_quality_report(device_id: str, days: int, cur) -> dict:
+    un = _pq_nominal_voltage(device_id, cur)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = _pq_intervals(device_id, since, cur)
+    gecerli = [r for r in rows if r["gecerli"]]
+    n = len(gecerli)
+
+    lo95, hi95 = (un * EN50160_LIMITS["voltage_band_pct"][0],
+                  un * EN50160_LIMITS["voltage_band_pct"][1])
+    lo100, hi100 = (un * EN50160_LIMITS["voltage_abs_band_pct"][0],
+                    un * EN50160_LIMITS["voltage_abs_band_pct"][1])
+    f_lo, f_hi = EN50160_LIMITS["frequency_band_hz"]
+    fa_lo, fa_hi = EN50160_LIMITS["frequency_abs_band_hz"]
+    thd_limit = EN50160_LIMITS["thd_limit_pct"]
+
+    def faz_degerleri(anahtar):
+        return [[r[anahtar][i] for r in gecerli if r[anahtar][i] is not None] for i in range(3)]
+
+    parametreler = []
+
+    # --- Gerilim ---
+    volt_ok = sum(1 for r in gecerli
+                  if all(v is None or lo95 <= v <= hi95 for v in r["v"]))
+    volt_abs_ok = sum(1 for r in gecerli
+                      if all(v is None or lo100 <= v <= hi100 for v in r["v"]))
+    faz_v = faz_degerleri("v")
+    # pass = None -> "olculmedi". Veri yoklugunu basarisizlik gibi gostermek
+    # yaniltici olurdu; arayuz bu ucuncu durumu ayri gosteriyor.
+    def gecti(sayac, toplam, gereken):
+        if not toplam:
+            return None
+        return _pq_pct(sayac, toplam) >= gereken
+
+    parametreler.append({
+        "key": "voltage",
+        "label": "Gerilim",
+        "limit": f"Un ±%10 ({lo95:.0f}–{hi95:.0f} V), ölçümlerin %95'i",
+        "value_pct": _pq_pct(volt_ok, n),
+        "required_pct": EN50160_LIMITS["voltage_band_required"],
+        "pass": gecti(volt_ok, n, EN50160_LIMITS["voltage_band_required"]),
+        "extra": {
+            "mutlak_limit": f"{lo100:.0f}–{hi100:.0f} V, ölçümlerin %100'ü",
+            "mutlak_pct": _pq_pct(volt_abs_ok, n),
+            "mutlak_pass": (volt_abs_ok == n) if n else None,
+            "faz_min": [round(min(v), 1) if v else None for v in faz_v],
+            "faz_max": [round(max(v), 1) if v else None for v in faz_v],
+        },
+    })
+
+    # --- Frekans ---
+    frek = [r["f"] for r in gecerli if r["f"] is not None]
+    frek_ok = sum(1 for f in frek if f_lo <= f <= f_hi)
+    frek_abs_ok = sum(1 for f in frek if fa_lo <= f <= fa_hi)
+    parametreler.append({
+        "key": "frequency",
+        "label": "Frekans",
+        "limit": f"{f_lo}–{f_hi} Hz, ölçümlerin %99,5'i",
+        "value_pct": _pq_pct(frek_ok, len(frek)),
+        "required_pct": EN50160_LIMITS["frequency_required"],
+        "pass": gecti(frek_ok, len(frek), EN50160_LIMITS["frequency_required"]),
+        "extra": {
+            "mutlak_limit": f"{fa_lo}–{fa_hi} Hz, ölçümlerin %100'ü",
+            "mutlak_pct": _pq_pct(frek_abs_ok, len(frek)),
+            "mutlak_pass": (frek_abs_ok == len(frek)) if frek else None,
+            "min": round(min(frek), 3) if frek else None,
+            "max": round(max(frek), 3) if frek else None,
+        },
+    })
+
+    # --- Gerilim harmonik bozulmasi ---
+    thd_var = [r for r in gecerli if any(t is not None for t in r["thvd"])]
+    thd_ok = sum(1 for r in thd_var
+                 if all(t is None or t <= thd_limit for t in r["thvd"]))
+    faz_thd = faz_degerleri("thvd")
+    parametreler.append({
+        "key": "thd",
+        "label": "Gerilim Harmonik Bozulması (THD-V)",
+        "limit": f"≤ %{thd_limit:g}, ölçümlerin %95'i",
+        "value_pct": _pq_pct(thd_ok, len(thd_var)),
+        "required_pct": EN50160_LIMITS["thd_required"],
+        "pass": gecti(thd_ok, len(thd_var), EN50160_LIMITS["thd_required"]),
+        "extra": {
+            "faz_max": [round(max(t), 2) if t else None for t in faz_thd],
+            "olculen_aralik": len(thd_var),
+        },
+    })
+
+    # Veri yetersizse "uygun" demek yaniltici olur -- EN 50160 bir haftalik
+    # pencere ongoruyor, elimizde daha azi varsa bunu acikca soyluyoruz.
+    beklenen_kova = days * 24 * 6
+    kapsama = _pq_pct(n, beklenen_kova) or 0.0
+    yeterli = n >= 100 and kapsama >= 50.0
+
+    olculebilir = [p for p in parametreler if p["pass"] is not None]
+    if not yeterli or not olculebilir:
+        verdict = "yetersiz_veri"
+    elif all(p["pass"] for p in olculebilir):
+        verdict = "uygun"
+    else:
+        verdict = "uygun_degil"
+
+    return {
+        "device_id": device_id,
+        "days": days,
+        "nominal_voltage": un,
+        "intervals": {
+            "toplam": len(rows),
+            "gecerli": n,
+            "olcum_yok": len(rows) - n,
+            "beklenen": beklenen_kova,
+            "kapsama_pct": kapsama,
+        },
+        "parameters": parametreler,
+        "not_assessed": [{"label": a, "reason": b} for a, b in PQ_NOT_ASSESSED],
+        "verdict": verdict,
+    }
+
+
+@app.get("/reports/power-quality")
+def get_power_quality(device_id: str, days: int = 7, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    days = max(1, min(days, 90))
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    try:
+        return power_quality_report(device_id, days, cur)
+    finally:
+        cur.close()
+        conn.close()
+
+
+class NominalVoltageRequest(BaseModel):
+    nominal_voltage: float
+
+
+@app.post("/devices/{device_id}/nominal-voltage")
+def set_nominal_voltage(device_id: str, payload: NominalVoltageRequest,
+                        user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if not 50 <= payload.nominal_voltage <= 1000:
+        raise HTTPException(status_code=400, detail="Nominal gerilim 50 ile 1000 V arasında olmalı")
+    conn = psycopg2.connect(**DB_CONFIG)
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO device_settings (device_id, nominal_voltage, updated_at)
+        VALUES (%s, %s, now())
+        ON CONFLICT (device_id) DO UPDATE SET nominal_voltage = EXCLUDED.nominal_voltage,
+                                              updated_at = now()
+    """, (device_id, payload.nominal_voltage))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"message": "Nominal gerilim kaydedildi"}
+
 # ---------- WebSocket: Canlı veri ----------
 connected_clients: list[tuple[WebSocket, str]] = []
 device_status: dict[str, dict] = {}  # device_id -> {"status": "online"|"offline", "changed_at": iso}

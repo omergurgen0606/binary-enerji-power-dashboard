@@ -2530,6 +2530,137 @@ const ALARM_METRIC_LIST = [
   { key: 'offline', label: 'Cihaz çevrimdışı', unit: 'dakika', step: '1', placeholder: '15' },
 ];
 
+// ---------- Güç Kalitesi (EN 50160) ----------
+const PQ_RANGES = [['7', '1 Hafta'], ['30', '30 Gün'], ['90', '90 Gün']];
+
+const PQ_VERDICTS = {
+  uygun: { label: 'Uygun', color: 'var(--accent)' },
+  uygun_degil: { label: 'Uygun Değil', color: 'var(--danger)' },
+  yetersiz_veri: { label: 'Yetersiz Veri', color: 'var(--muted)' },
+};
+
+function PqParam({ p }) {
+  const durum = p.pass === null
+    ? { text: 'Ölçülmedi', color: 'var(--muted)' }
+    : p.pass
+      ? { text: 'Uygun', color: 'var(--accent)' }
+      : { text: 'Uygun değil', color: 'var(--danger)' };
+
+  return (
+    <div style={{
+      padding: '12px 14px', borderRadius: 'var(--radius-sm)',
+      border: '1px solid var(--border)',
+      borderLeft: `3px solid ${durum.color}`,
+      background: 'var(--bg)', marginBottom: 10,
+    }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ fontSize: 13, fontWeight: 600 }}>{p.label}</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: durum.color }}>{durum.text}</div>
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 3 }}>{p.limit}</div>
+      {p.value_pct != null && (
+        <div style={{ fontSize: 12, marginTop: 6 }} className="mono">
+          Ölçümlerin <b style={{ color: durum.color }}>%{p.value_pct}</b>'i limit içinde
+          <span style={{ color: 'var(--muted)' }}> (gereken %{p.required_pct})</span>
+        </div>
+      )}
+      {p.extra?.faz_min && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }} className="mono">
+          Faz aralıkları: {p.extra.faz_min.map((v, i) =>
+            `L${i + 1} ${v ?? '—'}–${p.extra.faz_max[i] ?? '—'} V`).join('  ·  ')}
+        </div>
+      )}
+      {p.extra?.min != null && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }} className="mono">
+          Aralık: {p.extra.min}–{p.extra.max} Hz
+        </div>
+      )}
+      {p.extra?.faz_max && !p.extra?.faz_min && (
+        <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }} className="mono">
+          En yüksek: {p.extra.faz_max.map((v, i) => `L${i + 1} %${v ?? '—'}`).join('  ·  ')}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PowerQualitySection({ token, device }) {
+  const [days, setDays] = useState('7');
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    setData(null); setError('');
+    axios.get(`${API_BASE}/reports/power-quality?device_id=${device.device_id}&days=${days}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => { if (!cancelled) setData(res.data); })
+      .catch(() => { if (!cancelled) setError('Güç kalitesi raporu yüklenemedi.'); });
+    return () => { cancelled = true; };
+  }, [device.device_id, days, token]);
+
+  const verdict = data ? PQ_VERDICTS[data.verdict] : null;
+
+  return (
+    <SectionCard
+      title="Güç Kalitesi (EN 50160)"
+      right={<TabToggle options={PQ_RANGES} value={days} onChange={setDays} />}
+    >
+      {error && <div style={{ fontSize: 13, color: 'var(--danger)' }}>{error}</div>}
+      {!error && data === null && <div style={{ fontSize: 13, color: 'var(--muted)' }}>Yükleniyor…</div>}
+
+      {!error && data && (
+        <>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap',
+            padding: '12px 14px', marginBottom: 14, borderRadius: 'var(--radius-sm)',
+            background: `color-mix(in srgb, ${verdict.color} 8%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${verdict.color} 30%, var(--border))`,
+          }}>
+            <div>
+              <div style={{ fontSize: 11, color: 'var(--muted)' }}>DEĞERLENDİRME</div>
+              <div style={{ fontSize: 20, fontWeight: 700, color: verdict.color }}>{verdict.label}</div>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }} className="mono">
+              {data.intervals.gecerli} geçerli ölçüm aralığı
+              {data.intervals.olcum_yok > 0 && ` · ${data.intervals.olcum_yok} aralıkta ölçüm yok`}
+              <br />Dönem kapsaması %{data.intervals.kapsama_pct} · Nominal gerilim {data.nominal_voltage} V
+            </div>
+          </div>
+
+          {data.verdict === 'yetersiz_veri' && (
+            <div style={{
+              fontSize: 12, color: 'var(--muted)', marginBottom: 14, padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+            }}>
+              EN 50160 değerlendirmesi normalde <b>bir haftalık kesintisiz</b> ölçüme dayanır.
+              Bu dönemde yeterli ölçüm yok, bu yüzden aşağıdaki sonuçlar <b>uygunluk beyanı
+              değil</b>, yalnızca eldeki verinin özetidir.
+            </div>
+          )}
+
+          {data.parameters.map((p) => <PqParam key={p.key} p={p} />)}
+
+          <div style={{
+            marginTop: 14, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+            border: '1px dashed var(--border)', fontSize: 11, color: 'var(--muted)',
+          }}>
+            <b>Bu rapor resmî bir uygunluk belgesi değildir.</b> Ölçümler 10 dakikalık
+            ortalamalar üzerinden EN 50160'ın tanımladığı yönteme göre yapılır, ancak
+            standardın bazı parametreleri bu cihazla ölçülemiyor ve değerlendirmeye
+            girmiyor:
+            <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+              {data.not_assessed.map((x) => (
+                <li key={x.label}>{x.label} — <i>{x.reason}</i></li>
+              ))}
+            </ul>
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
 // ---------- Fatura Analizi (zaman dilimi + güç aşımı + reaktif) ----------
 function monthLabel(bucket) {
   return new Date(bucket).toLocaleDateString('tr-TR', { month: 'short', year: 'numeric' });
@@ -4103,6 +4234,7 @@ function DeviceDashboard({ token, device, onBack, onLogout, theme }) {
       <PeaksSection peaks={peaks} />
       <DemandSection demand={demand} />
       <HarmonicsSection harmonics={harmonics} />
+      <PowerQualitySection token={token} device={device} />
       <AlarmsSection token={token} device={device} />
       <DeviceInfoSection info={deviceInfo} />
 
