@@ -68,6 +68,15 @@ scp -q "$REPO/docker-compose.yml" "$HOST:/root/docker-compose.yml"
 echo "→ api-staging başlatılıyor (üretim api'sine dokunulmuyor)"
 ssh "$HOST" "cd /root && docker compose up -d --build api-staging" 2>&1 | tail -3
 
+# Konteynerin hazir olmasini bekle. Bu olmadan duman testi henuz acilmamis
+# servise gidiyor, nginx hata sayfasi donuyor ve dagitim "staging kendini
+# tanimiyor" diye YANLIS sekilde basarisiz oluyordu -- gercek bir sorun yokken.
+echo "→ ayağa kalkması bekleniyor"
+for _ in $(seq 1 30); do
+  if ssh "$HOST" "curl -sf http://127.0.0.1:8001/health >/dev/null 2>&1"; then break; fi
+  sleep 2
+done
+
 echo "→ web bundle (staging)"
 cd "$REPO"
 npx vite build >/dev/null 2>&1

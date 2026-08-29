@@ -581,6 +581,41 @@ Kademeli bildirim altyapısı bu cihazlarda hiç devreye girmiyordu, çünkü iz
 
 Alarm oluşturma başarısız olursa cihaz kaydı yine tamamlanır (hata günlüğe yazılır) — alarm kurulamadı diye müşterinin cihaz eklemesi düşmemeli. Göç dosyası tekrar çalıştırılarak eksikler kapatılabilir.
 
+## 8.7. Uzaktan WiFi Ağı Değiştirme
+
+Cihaz ayarlarından cihazın bağlanacağı WiFi ağı değiştirilebiliyor. Komut MQTT üzerinden gidiyor, sonuç `powermeter/<id>/wifi` konusundan geri dönüyor.
+
+**Önce MQTT TLS gerekti.** Bu özellik müşterinin ağ parolasını kanaldan geçiriyor; broker düz metin 1883'te dinlerken bunu göndermek parolayı açıkta bırakırdı (bkz. 8.8).
+
+**Cihazı kaybetmeme tasarımı** — buradaki asıl risk, yanlış bilgiyle cihazın erişilemez hale gelmesi:
+
+1. Firmware eski bilgileri saklar, **yeni ağı dener**
+2. Bağlanırsa yeni bilgileri kaydeder (`prefs`), sonucu bildirir
+3. Bağlanamazsa **eski ağa döner**; kayıtlı bilgi hiç değişmez
+4. İkisi de yoksa 3 dakika sonra yeniden başlar ve kurulum moduna düşer — kayıtlı bilgi hâlâ eskisi olduğu için eski ağ geri gelirse cihaz kendiliğinden toparlanır
+
+**Çevrimdışı cihaza gönderilmez** (409). MQTT'de kuyruk yok: dinlemeyen cihaza giden mesaj kaybolur, kullanıcı ayarın uygulandığını sanır ve cihaz eski ağında kalırdı.
+
+**Parola denetim kaydına yazılmaz.** Denetim kaydı yalnızca SSID'yi tutuyor; bunu doğrulayan bir test var.
+
+Sonuç hemen dönemiyor — cihaz ağ değiştirirken MQTT bağlantısı kopuyor. Bu yüzden istemciler 90 saniye boyunca yokluyor; tek seferlik istek hep "henüz sonuç yok" döner.
+
+## 8.8. MQTT TLS
+
+Broker yalnızca düz metin `1883`'ü dinliyordu ve o port açık internete yayınlanmıştı. Her cihaz bağlantısında broker parolası açık gidiyordu, tüm telemetri yolda okunabiliyordu, ve yakalayan biri sahte ölçüm yayınlayabilir ya da tüm cihazları dinleyebilirdi.
+
+Açık olan yalnızca **cihaz tarafıydı**: API broker'a docker ağından (`MQTT_BROKER=mosquitto`) bağlanıyor, o trafik VPS'ten çıkmıyor.
+
+- `8883` — TLS, cihazlar buradan bağlanır
+- `1883` — mevcut firmware'li cihazlar için hâlâ yayında. **Tüm cihazlar flash'landıktan sonra docker-compose'daki `"1883:1883"` yayını kaldırılmalı** — açığı asıl kapatan adım bu.
+
+İki tuzak, ikisi de sessizce her şeyi bozardı:
+
+- **Sertifika bağlanamaz, kopyalanmalı.** Mosquitto konteynerde uid 1883, Let's Encrypt özel anahtarı 0600 root. Doğrudan bağlansaydı anahtar okunamaz ve TLS dinleyicisi hiç açılmazdı. `ops/mosquitto_sertifika_senkron.sh` kopyalıyor, certbot deploy kancası yenilemede tekrar çalıştırıyor.
+- **Firmware'de NTP yoktu.** ESP32 epoch 0'dan başlar; saat ayarlı değilken sertifika doğrulaması daima "henüz geçerli değil" der ve cihaz broker'a **hiç** bağlanamaz.
+
+Firmware IP yerine `binaryenerji.com`'a bağlanıyor — sertifika alan adına düzenlenmiş, IP host doğrulamasını kırar. Kök olarak ISRG Root X1 gömülü. Beş kez üst üste doğrulama başarısız olursa doğrulanmamış TLS'e düşüyor: sahada erişilemez bir cihaz, zayıf doğrulanmış bir bağlantıdan kötüdür.
+
 ## 9. Dağıtım ve Staging Ortamı
 
 **Neden var:** 28 Ağustos 2026'da bağlantı havuzu hatası doğrudan üretime gitti ve 22 yazma uç noktası sessizce yazdıklarını atmaya başladı (bkz. bölüm 8). Hata yalnızca gerçek bir çalışan süreçte görünüyordu — birim testi değil, çalışan bir ortam gerekiyordu.
