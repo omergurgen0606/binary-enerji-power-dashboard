@@ -563,6 +563,24 @@ Tasarım kararları — her biri gerçek bir hatayı önlüyor:
 
 `tests/test_cevrimdisi_kademeleri.py` bunların hepsini doğruluyor; karar mantığı sonsuz döngüden `_offline_karar()` olarak ayrıldı ki test edilebilsin.
 
+## 8.6. Varsayılan Çevrimdışı Alarmı
+
+Cihaz kaydedilirken çevrimdışı alarmı **kendiliğinden** açılıyor (`ensure_offline_alarm`). Alarm eklemeyi hatırlamak müşterinin işi olmamalı; izleme ürününün varsayılanı izlemek olmalı.
+
+Bu varsayımsal bir eksik değildi — eklendiğinde üretimdeki üç cihazın **ikisinde** çevrimdışı kuralı yoktu:
+
+- **ANL13** — 9 gün 21 saattir sessizdi, kimseye haber verilmemişti
+- **anl 13 yeni** — eklendiğinden beri **hiç** veri göndermemişti, yine sessizlik
+
+Kademeli bildirim altyapısı bu cihazlarda hiç devreye girmiyordu, çünkü izleyecek kural yoktu. `ops/schema/2026-08-29-varsayilan-cevrimdisi-alarmi.sql` mevcut cihazları geriye dönük tamamlıyor (idempotent, var olan kuralların eşiğine dokunmuyor).
+
+**Varsayılan eşik 10 dakika.** İki kısıt arasından seçildi:
+
+- Firmware'in **kendi** toparlanma döngüsünden uzun olmalı: WiFi kopunca 3 dakika yeniden bağlanmayı dener, sonra kendini yeniden başlatır ve ~15 saniyede bağlanır (~4-5 dakika). Daha kısa bir eşik, cihazın kendi düzelttiği kesintilerde boş alarm üretirdi.
+- **15'ten küçük olmalı** ki kademe merdiveninin tamamı (8 basamak) açılsın; 15 olsaydı "çevrimdışı oldu" ile "15 dakikadır" aynı ana düşerdi.
+
+Alarm oluşturma başarısız olursa cihaz kaydı yine tamamlanır (hata günlüğe yazılır) — alarm kurulamadı diye müşterinin cihaz eklemesi düşmemeli. Göç dosyası tekrar çalıştırılarak eksikler kapatılabilir.
+
 ## 9. Dağıtım ve Staging Ortamı
 
 **Neden var:** 28 Ağustos 2026'da bağlantı havuzu hatası doğrudan üretime gitti ve 22 yazma uç noktası sessizce yazdıklarını atmaya başladı (bkz. bölüm 8). Hata yalnızca gerçek bir çalışan süreçte görünüyordu — birim testi değil, çalışan bir ortam gerekiyordu.
