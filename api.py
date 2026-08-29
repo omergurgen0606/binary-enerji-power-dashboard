@@ -537,6 +537,13 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
             "VALUES (%s, %s, %s, %s, %s)",
             (device_id, name, user, facility_id, department_id),
         )
+        # Cihaz izlemesiz kalmasin. Basarisiz olursa kayit yine de tamamlanir --
+        # alarm kurulamadi diye musterinin cihaz eklemesi dusmemeli -- ama sessiz
+        # kalmaz: ops/varsayilan_alarm_tamamla.sql eksikleri kapatabiliyor.
+        try:
+            ensure_offline_alarm(device_id, cur)
+        except Exception as e:
+            logger.error("Varsayılan çevrimdışı alarmı oluşturulamadı (%s): %s", device_id, e)
     except psycopg2.IntegrityError:
         raise HTTPException(status_code=409, detail="Bu cihaz ID'si zaten kayıtlı")
     finally:
@@ -2031,6 +2038,39 @@ def evaluate_alarms(device_id: str, data: dict, cur):
 # gectiginde BIR bildirim gonderilir; sonuncudan sonra susulur. Sonsuza kadar
 # bildirim gondermek, bildirimlerin tamamen yok sayilmasiyla biter.
 OFFLINE_ESCALATION_MINUTES = [15, 60, 360, 720, 1440, 10080, 43200]
+
+
+# Yeni cihaza kendiliginden acilan cevrimdisi alarminin esigi.
+#
+# 10 dakika secildi cunku firmware'in KENDI toparlanma dongusu bundan kisa:
+# WiFi kopunca 3 dakika yeniden baglanmayi dener, sonra kendini yeniden
+# baslatir ve 15 saniye icinde baglanir -- yaklasik 4-5 dakika. Daha kisa bir
+# esik, cihazin kendi kendine duzelttigi kesintilerde bos alarm uretirdi.
+#
+# 15'ten kucuk olmasi ayrica kademe merdiveninin tamamini (8 basamak) acar;
+# 15 olsaydi "cevrimdisi oldu" ile "15 dakikadir" ayni ana duserdi.
+DEFAULT_OFFLINE_MINUTES = 10
+
+
+def ensure_offline_alarm(device_id: str, cur) -> bool:
+    """Cihazin bir cevrimdisi alarmi oldugundan emin olur. Idempotent.
+
+    Izleme urununde varsayilan izlemek olmali. Alarm eklemeyi hatirlamak
+    musterinin isi degil -- hatirlamayan musteri veri kaybini sessizce
+    yasiyordu.
+    """
+    cur.execute(
+        "SELECT 1 FROM alarm_rules WHERE device_id = %s AND metric = 'offline' LIMIT 1",
+        (device_id,),
+    )
+    if cur.fetchone():
+        return False
+    cur.execute(
+        "INSERT INTO alarm_rules (device_id, metric, phase, condition, offline_minutes) "
+        "VALUES (%s, 'offline', 'any', 'gt', %s)",
+        (device_id, DEFAULT_OFFLINE_MINUTES),
+    )
+    return True
 
 
 def _offline_milestones(offline_minutes: int) -> list[int]:
