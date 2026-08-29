@@ -4204,6 +4204,132 @@ const CT_RATIO_TABLE = [
   7500, 8000, 8500, 10000,
 ];
 
+function WifiBox({ token, device, connected }) {
+  const [ssid, setSsid] = useState('');
+  const [pass, setPass] = useState('');
+  const [acik, setAcik] = useState(false);
+  const [durum, setDurum] = useState(null); // 'gonderiliyor' | 'bekleniyor' | null
+  const [toast, setToast] = useState(null);
+
+  async function gonder() {
+    setDurum('gonderiliyor');
+    setToast(null);
+    try {
+      await axios.post(`${API_BASE}/devices/${device.device_id}/wifi`,
+        { ssid: ssid.trim(), password: pass },
+        { headers: { Authorization: `Bearer ${token}` } });
+      setPass('');
+      setDurum('bekleniyor');
+      sonucuBekle();
+    } catch (err) {
+      setDurum(null);
+      setToast({ ok: false, text: err.response?.data?.detail || 'Gönderilemedi.' });
+    }
+  }
+
+  // Cihaz ag degistirirken baglantisi kopuyor; sonuc ancak yeniden baglandiginda
+  // gelebiliyor. Bu yuzden bir sure yoklamak gerekiyor -- tek seferlik istek
+  // her zaman "henuz sonuc yok" doner.
+  function sonucuBekle() {
+    const bitis = Date.now() + 90000;
+    const timer = setInterval(async () => {
+      try {
+        const res = await axios.get(`${API_BASE}/devices/${device.device_id}/wifi`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.data?.ok === true) {
+          clearInterval(timer);
+          setDurum(null);
+          setToast({ ok: true, text: 'Cihaz yeni ağa bağlandı.' });
+        } else if (res.data?.ok === false) {
+          clearInterval(timer);
+          setDurum(null);
+          setToast({ ok: false, text: res.data.hata || 'Bağlanamadı, cihaz eski ağına döndü.' });
+        }
+      } catch { /* yoklama basarisiz olabilir, devam */ }
+      if (Date.now() > bitis) {
+        clearInterval(timer);
+        setDurum(null);
+        setToast({ ok: false, text: 'Cihazdan yanıt gelmedi. Yeni ağa bağlanamadıysa eski ağına dönmüş olmalı.' });
+      }
+    }, 5000);
+  }
+
+  return (
+    <div style={{
+      padding: '10px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <button onClick={() => setAcik((o) => !o)} style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%',
+        background: 'none', border: 'none', cursor: 'pointer', padding: 0,
+        fontSize: 13, fontWeight: 600, color: 'var(--ink)',
+      }}>
+        <span>WiFi Ağını Değiştir</span>
+        <span style={{ color: 'var(--muted)' }}>{acik ? '▲' : '▼'}</span>
+      </button>
+
+      {acik && (
+        <>
+          <span style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.5 }}>
+            Cihaz yeni ağa bağlanmayı dener. <b>Bağlanamazsa eski ağına geri döner</b> — yeni
+            bilgiler yalnızca bağlantı kurulduktan sonra kaydedilir. Cihaz bu sırada
+            bir-iki dakika çevrimdışı görünür.
+          </span>
+
+          {!connected && (
+            <span style={{ fontSize: 11, color: 'var(--warn)' }}>
+              Cihaz şu anda çevrimdışı. WiFi ayarı yalnızca bağlı bir cihaza gönderilebilir.
+            </span>
+          )}
+
+          <input
+            value={ssid}
+            onChange={(e) => setSsid(e.target.value)}
+            placeholder="Ağ adı (SSID)"
+            maxLength={32}
+            style={{
+              padding: '7px 9px', borderRadius: 'var(--radius-xs)',
+              border: '1px solid var(--border)', background: 'var(--bg)',
+              color: 'var(--ink)', fontSize: 13,
+            }}
+          />
+          <input
+            type="password"
+            value={pass}
+            onChange={(e) => setPass(e.target.value)}
+            placeholder="Parola (açık ağ için boş bırakın)"
+            maxLength={63}
+            style={{
+              padding: '7px 9px', borderRadius: 'var(--radius-xs)',
+              border: '1px solid var(--border)', background: 'var(--bg)',
+              color: 'var(--ink)', fontSize: 13,
+            }}
+          />
+          <button
+            onClick={gonder}
+            disabled={!connected || !ssid.trim() || durum !== null}
+            style={{
+              alignSelf: 'flex-start', padding: '7px 14px', borderRadius: 'var(--radius-xs)',
+              border: '1px solid var(--border)', cursor: (!connected || !ssid.trim() || durum) ? 'not-allowed' : 'pointer',
+              background: 'var(--surface)', color: 'var(--ink)', fontSize: 13,
+              opacity: (!connected || !ssid.trim() || durum) ? 0.5 : 1,
+            }}
+          >
+            {durum === 'bekleniyor' ? 'Cihaz bağlanıyor…' : durum ? 'Gönderiliyor…' : 'Gönder'}
+          </button>
+
+          {toast && (
+            <span style={{ fontSize: 12, color: toast.ok ? 'var(--accent)' : 'var(--danger)' }}>
+              {toast.text}
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function CtRatioBox({ token, device, ctRatio, onSaved }) {
   const [selected, setSelected] = useState('');
   const [loading, setLoading] = useState(false);
@@ -4816,6 +4942,7 @@ function DeviceDashboard({ token, device, tab, onTabChange, onBack, onLogout, th
           {settingsOpen && (
             <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
               <CtRatioBox token={token} device={device} ctRatio={ctRatio} onSaved={fetchCtRatio} />
+            <WifiBox token={token} device={device} connected={esp32Status === 'online'} />
               <FirmwareBox token={token} device={device} firmware={firmware} onUpdated={fetchFirmware} />
               {deviceInfo ? (
                 <>

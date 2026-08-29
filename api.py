@@ -169,6 +169,7 @@ MQTT_PEAKS_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/peaks/+"
 MQTT_DEMAND_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/demand/+"
 MQTT_HARMONICS_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/harmonics/+"
 MQTT_INFO_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/info"
+MQTT_WIFI_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/wifi"
 
 def live_topic(device_id: str) -> str:
     return f"{MQTT_TOPIC_PREFIX}/{device_id}/live"
@@ -2837,6 +2838,69 @@ def publish_command(device_id: str, register: int, value: int = 1):
         client.loop_stop()
         client.disconnect()
 
+class WifiConfigRequest(BaseModel):
+    ssid: str
+    password: str = ""
+
+
+def publish_wifi_config(device_id: str, ssid: str, password: str):
+    """WiFi degistirme komutunu cihaza yollar."""
+    client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
+    client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
+    client.connect(MQTT_BROKER, 1883, 10)
+    client.loop_start()
+    try:
+        payload = json.dumps({"cmd": "wifi", "ssid": ssid, "pass": password})
+        info = client.publish(cmd_topic(device_id), payload, qos=1)
+        info.wait_for_publish(timeout=5)
+    finally:
+        client.loop_stop()
+        client.disconnect()
+
+
+@app.post("/devices/{device_id}/wifi")
+def set_device_wifi(device_id: str, payload: WifiConfigRequest, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+
+    ssid = payload.ssid.strip()
+    if not ssid:
+        raise HTTPException(status_code=400, detail="Ağ adı (SSID) boş olamaz")
+    if len(ssid) > 32 or len(payload.password) > 63:
+        raise HTTPException(status_code=400, detail="Ağ adı en fazla 32, parola en fazla 63 karakter olabilir")
+
+    # Cevrimdisi cihaza komut gondermek sessizce hicbir sey yapmaz; kullanici
+    # ayarin uygulandigini sanir. MQTT'de kuyruk yok -- cihaz dinlemiyorsa mesaj
+    # kaybolur.
+    durum = device_status.get(device_id)
+    if not durum or durum.get("status") != "online":
+        raise HTTPException(
+            status_code=409,
+            detail="Cihaz şu anda çevrimiçi değil. WiFi ayarı yalnızca bağlı bir cihaza gönderilebilir.")
+
+    # DIKKAT: parola ASLA denetim kaydina veya gunluge yazilmiyor.
+    audit("device.wifi_config", actor=user, entity_type="device", entity_id=device_id,
+          detail={"ssid": ssid})
+
+    device_wifi_result.pop(device_id, None)
+    try:
+        publish_wifi_config(device_id, ssid, payload.password)
+    except Exception as e:
+        logger.error("WiFi komutu yayınlanamadı (%s): %s", device_id, e)
+        raise HTTPException(status_code=502, detail="Komut cihaza iletilemedi, tekrar deneyin")
+
+    return {"message": "WiFi ayarı gönderildi. Cihaz yeni ağa bağlanmayı deneyecek.",
+            "note": "Bağlanamazsa eski ağına geri döner."}
+
+
+@app.get("/devices/{device_id}/wifi")
+def get_device_wifi_result(device_id: str, user: str = Depends(require_auth)):
+    """Son WiFi degistirme denemesinin sonucu (varsa)."""
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    return device_wifi_result.get(device_id) or {"ok": None}
+
+
 @app.post("/devices/{device_id}/command")
 def send_device_command(device_id: str, payload: DeviceCommandRequest, user: str = Depends(require_auth)):
     audit("device.command", actor=user, entity_type="device", entity_id=device_id,
@@ -4716,6 +4780,7 @@ AUDIT_LABELS = {
     "device.command": "Cihaza komut gönderildi",
     "device.ota": "Firmware güncellemesi başlatıldı",
     "device.ct_ratio": "Akım trafo oranı değiştirildi",
+    "device.wifi_config": "Cihazın WiFi ağı değiştirildi",
     "tariff.update": "Tarife ayarları değiştirildi",
     "alarm_rule.create": "Alarm kuralı eklendi",
     "alarm_rule.delete": "Alarm kuralı silindi",
@@ -4925,6 +4990,9 @@ def delete_my_account(payload: DeleteAccountRequest, user: str = Depends(require
 # ---------- WebSocket: Canlı veri ----------
 connected_clients: list[tuple[WebSocket, str]] = []
 device_status: dict[str, dict] = {}  # device_id -> {"status": "online"|"offline", "changed_at": iso}
+# WiFi degistirme sonucu. Gecici bir durum -- device_status ile ayni desende
+# bellekte tutuluyor. ASLA SSID/parola saklanmiyor, yalnizca sonuc.
+device_wifi_result: dict[str, dict] = {}
 
 def _websocket_subscription_ok(username: str) -> bool:
     conn = db_connect()
@@ -4998,6 +5066,7 @@ def mqtt_thread():
         client.subscribe(MQTT_DEMAND_WILDCARD)
         client.subscribe(MQTT_HARMONICS_WILDCARD)
         client.subscribe(MQTT_INFO_WILDCARD)
+        client.subscribe(MQTT_WIFI_WILDCARD)
 
     def handle_status(device_id: str, payload: str):
         status = payload.strip()
@@ -5007,6 +5076,18 @@ def mqtt_thread():
             asyncio.run_coroutine_threadsafe(
                 broadcast({"type": "status", "esp32_status": status, "changed_at": changed_at}, device_id),
                 main_loop,
+            )
+
+    def handle_wifi_result(device_id: str, data: dict):
+        sonuc = {
+            "ok": data.get("ok"),
+            "hata": data.get("hata"),
+            "at": datetime.utcnow().isoformat() + "Z",
+        }
+        device_wifi_result[device_id] = sonuc
+        if main_loop:
+            asyncio.run_coroutine_threadsafe(
+                broadcast({"type": "wifi_result", **sonuc}, device_id), main_loop,
             )
 
     def handle_live(device_id: str, data: dict):
@@ -5136,6 +5217,8 @@ def mqtt_thread():
                 handle_stats(device_id, data)
             elif msg.topic.endswith("/info"):
                 handle_info(device_id, data)
+            elif msg.topic.endswith("/wifi"):
+                handle_wifi_result(device_id, data)
         except Exception as e:
             print("Hata:", e)
 
