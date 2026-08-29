@@ -95,6 +95,19 @@ echo "$SAGLIK" | grep -q "\"veritabani\":\"$STAGING_DB\"" \
 echo "$SAGLIK" | grep -q '"veritabani_erisimi":true' \
   || { echo "✗ staging veritabanına ulaşamıyor" >&2; exit 1; }
 
+# Broker'in hala ayakta oldugunu dogrula. Bu betik TUM docker-compose.yml'i
+# kopyaliyor, yani yalnizca api-staging'i degil butun yigini etkileyebiliyor.
+# Bir kez tam olarak bu oldu: sunucuda elle yapilmis TLS yapilandirmasi
+# (8883 + sertifika baglamasi) depodaki kopya tarafindan geri alindi. Konteyner
+# calismaya devam ettigi icin hicbir sey belli olmadi -- ta ki mosquitto bir
+# sonraki yeniden baslatmada sertifikayi bulamayip cokme dongusune girene kadar.
+# Sessiz bir mayin; bu kontrol onu dagitim aninda gorunur kiliyor.
+echo "→ broker kontrolü"
+BROKER=$(ssh "$HOST" "docker ps --filter name=mosquitto --format '{{.Status}}'")
+echo "$BROKER" | grep -q '^Up' \
+  || { echo "✗ mosquitto ayakta değil ($BROKER) -- compose kopyalanınca bozulmuş olabilir" >&2; exit 1; }
+echo "  ✓ broker ayakta: $BROKER"
+
 # Üretimin bu dağıtımdan etkilenmediğini de doğrula.
 URETIM=$(ssh "$HOST" "curl -s http://127.0.0.1:8000/health")
 echo "$URETIM" | grep -q '"ortam":"uretim"' \

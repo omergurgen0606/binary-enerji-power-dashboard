@@ -3,10 +3,19 @@ services:
     image: eclipse-mosquitto:2
     restart: unless-stopped
     ports:
-      - "1883:1883"
+      # 1883 BILEREK YAYINLANMIYOR. Cihazlar 8883'ten TLS ile baglanir; duz
+      # metin 1883'te broker parolasi her baglantida acik gidiyor ve tum
+      # telemetri yolda okunabiliyordu. API broker'a docker agindan
+      # (MQTT_BROKER=mosquitto) ulastigi icin ic trafik bundan etkilenmiyor --
+      # 1883 konteyner icinde hala dinliyor, sadece disariya acilmiyor.
+      - "8883:8883"
     volumes:
       - /etc/mosquitto/conf.d/default.conf:/mosquitto/config/mosquitto.conf:ro
       - /etc/mosquitto/passwd:/etc/mosquitto/passwd:ro
+      # TLS sertifikalari. Bu baglama olmadan mosquitto sertifikayi bulamaz,
+      # acilista hata verip CIKAR ve broker cokme dongusune girer -- yani
+      # eksikligi sessiz degil, tam kesinti demek.
+      - /etc/mosquitto/certs:/mosquitto/certs:ro
       - mosquitto_data:/mosquitto/data
       - mosquitto_log:/mosquitto/log
     networks:
