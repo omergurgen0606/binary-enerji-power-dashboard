@@ -2979,6 +2979,32 @@ def set_ct_ratio(device_id: str, payload: CtRatioRequest, user: str = Depends(re
         raise HTTPException(status_code=502, detail="Komut cihaza gönderilemedi")
     return {"message": "Akım trafo oranı gönderildi"}
 
+def ct_ratio_from_index(index) -> int | None:
+    """Cihazin bildirdigi TABLO INDEKSINI gercek akim trafo oranina cevirir.
+
+    Register 221 orani degil, "Akim Trafo Tablosu"ndaki sirayi tutuyor (0-69).
+    Yazma yolu bunu zaten biliyor (set_ct_ratio, oran -> indeks); okuma yolunda
+    ters cevirim yoktu, bu yuzden panelde indeks oran gibi gorunuyordu: cihaz
+    600/5 ile calisirken ayarlar ekrani "34" yaziyordu.
+
+    Cevirimi cihazda degil burada yapiyoruz -- tablo zaten burada ve ters yonu
+    de buradan kullaniliyor, boylece iki yon ayni kaynaktan besleniyor ve
+    firmware'i yeniden flash'lamak gerekmiyor.
+    """
+    if index is None:
+        return None
+    try:
+        i = int(index)
+    except (TypeError, ValueError):
+        return None
+    if 0 <= i < len(CT_RATIO_TABLE):
+        return CT_RATIO_TABLE[i]
+    # Aralik disi: tahmin etmektense bilinmiyor birak -- yanlis bir oran,
+    # eksik bir orandan daha kotu.
+    logger.warning("CT trafo tablo indeksi aralik disi: %s", index)
+    return None
+
+
 @app.get("/ct-ratio-table")
 def get_ct_ratio_table(user: str = Depends(require_auth)):
     return CT_RATIO_TABLE
@@ -5140,7 +5166,8 @@ def mqtt_thread():
                     ct_ratio = COALESCE(EXCLUDED.ct_ratio, device_settings.ct_ratio),
                     fw_version = COALESCE(EXCLUDED.fw_version, device_settings.fw_version),
                     updated_at = now()
-            """, (device_id, data.get("ct_ratio"), data.get("fw_version")))
+            """, (device_id, ct_ratio_from_index(data.get("ct_ratio")),
+                  data.get("fw_version")))
 
     def handle_stats(device_id: str, data: dict):
         values = [data.get(k) for k in STATS_JSON_KEYS]
