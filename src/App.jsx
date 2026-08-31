@@ -166,7 +166,7 @@ function AuthForm({ onLogin }) {
 
         <div style={{ position: 'relative', zIndex: 1, maxWidth: 420 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 32 }}>
-            <img src="/logo.png" alt="" style={{ height: 30 }} />
+            <img className="marka-logo" src="/logo.png" alt="" style={{ height: 30 }} />
             <span style={{ color: '#fff', fontSize: 13, fontWeight: 700, letterSpacing: 2 }}>BINARY ENERJİ</span>
           </div>
           <h1 style={{ color: '#fff', fontSize: 32, fontWeight: 700, lineHeight: 1.22, margin: '0 0 14px' }}>
@@ -226,7 +226,7 @@ function AuthForm({ onLogin }) {
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '40px 24px', background: 'var(--bg)' }}>
         <div style={{ width: '100%', maxWidth: 360 }}>
           <div className="auth-mobile-brand" style={{ alignItems: 'center', gap: 8, marginBottom: 24, justifyContent: 'center' }}>
-            <img src="/logo.png" alt="Binary Enerji" style={{ height: 28 }} />
+            <img className="marka-logo" src="/logo.png" alt="Binary Enerji" style={{ height: 28 }} />
             <span style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1.5, fontWeight: 600 }}>BINARY ENERJİ</span>
           </div>
           <div style={{
@@ -1611,7 +1611,7 @@ function InvitePage({ token, onLogin }) {
 
   return (
     <div className="centered-page" style={{ maxWidth: 460, padding: '0 24px' }}>
-      <img src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
+      <img className="marka-logo" src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
       <div style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1, marginBottom: 20, textAlign: 'center' }}>
         BINARY ENERJİ
       </div>
@@ -2275,7 +2275,7 @@ function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, o
           Hesabım
         </button>
       </div>
-      <img src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
+      <img className="marka-logo" src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
       <div style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1, marginBottom: 4, textAlign: 'center' }}>BINARY ENERJİ</div>
       <h1 style={{ margin: '0 0 24px', fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700, textAlign: 'center' }}>Cihazlarım</h1>
       <SubscriptionBanner subscription={subscription} />
@@ -4805,7 +4805,7 @@ function DeviceDashboard({ token, device, tab, onTabChange, onBack, onLogout, th
             ← Cihazlarım
           </button>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <img src="/logo.png" alt="Binary Enerji" style={{ height: 16 }} />
+            <img className="marka-logo" src="/logo.png" alt="Binary Enerji" style={{ height: 16 }} />
             <span style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1 }}>BINARY ENERJİ</span>
           </div>
           <h1 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 700 }}>{device.name}</h1>
