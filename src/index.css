@@ -10,6 +10,11 @@
   --l3: #4A5FC1;
   --danger: #C23B3B;
   --warn: #C98A1A;
+  /* Logo tek renkli ve neredeyse siyah (36,32,33), zemini seffaf. Koyu
+     temalarda zemine karisip kayboluyordu. Her tema kendi degerini
+     bildiriyor -- boylece yeni bir tema eklerken karar, temanin tanimlandigi
+     yerde veriliyor. */
+  --logo-filter: none;
   --accent: #1B7A72;
   --font-display: 'IBM Plex Sans', sans-serif;
   --font-body: 'IBM Plex Sans', sans-serif;
@@ -31,6 +36,8 @@
 
 /* Yön A — Ölçü Cihazı: laboratuvar güç analizörü hissi */
 [data-theme="olcu-cihazi"] {
+  /* koyu zemin: siyah isaret gorunmez kalirdi */
+  --logo-filter: invert(1);
   --bg: #0A0D10;
   --surface: #14181C;
   --ink: #E8ECEF;
@@ -59,6 +66,8 @@
 
 /* Yön B — Kontrol Panosu: elektrik pano dolabı hissi */
 [data-theme="kontrol-panosu"] {
+  /* koyu zemin: siyah isaret gorunmez kalirdi */
+  --logo-filter: invert(1);
   --bg: #1C2024;
   --surface: #262B30;
   --ink: #F0F1F2;
@@ -154,6 +163,8 @@
 
 /* Yön F — Faz Portresi: güç mühendisliğinin fazör diyagramı dili */
 [data-theme="faz-portresi"] {
+  /* koyu zemin: siyah isaret gorunmez kalirdi */
+  --logo-filter: invert(1);
   --bg: #0A0E14;
   --surface: #12181F;
   --ink: #E4E9EF;
@@ -180,6 +191,8 @@
 
 /* Yön H — Kadran Kümesi: analog ölçü aleti, pirinç/fildişi hissi */
 [data-theme="kadran-kumesi"] {
+  /* koyu zemin: siyah isaret gorunmez kalirdi */
+  --logo-filter: invert(1);
   --bg: #1C1712;
   --surface: #251F17;
   --ink: #F3E9D2;
@@ -461,4 +474,9 @@ body {
     gap: 4px;
     font-size: 13px;
   }
+}
+
+/* ---------- Marka logosu ---------- */
+.marka-logo {
+  filter: var(--logo-filter, none);
 }
