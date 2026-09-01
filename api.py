@@ -3040,6 +3040,8 @@ TARIFF_DEFAULTS = {
     # Sozlesme gucu (kW) ve asan kW basina bedel.
     "contract_power_kw": None,
     "demand_price": 0.0,
+    "tariff_verified": False,
+    "tariff_source": None,
 }
 BILLING_MODES = ("full", "excess")
 # Faturalama donemi yerel aya gore isler, UTC'ye gore degil.
@@ -3067,6 +3069,8 @@ class TariffRequest(BaseModel):
     t3_price: float = 0.0
     contract_power_kw: float | None = None
     demand_price: float = 0.0
+    tariff_verified: bool = False
+    tariff_source: str | None = None
 
 
 def _read_tariff(device_id: str, cur) -> dict:
@@ -3074,12 +3078,13 @@ def _read_tariff(device_id: str, cur) -> dict:
         SELECT inductive_limit_pct, capacitive_limit_pct, reactive_price,
                active_price, billing_mode, updated_at,
                t1_start, t2_start, t3_start, t1_price, t2_price, t3_price,
-               contract_power_kw, demand_price
+               contract_power_kw, demand_price, tariff_verified, tariff_source
         FROM device_tariff WHERE device_id = %s
     """, (device_id,))
     row = cur.fetchone()
     if not row:
-        return {**TARIFF_DEFAULTS, "updated_at": None, "configured": False}
+        return {**TARIFF_DEFAULTS, "updated_at": None, "configured": False,
+                "tariff_verified": False, "tariff_source": None}
     return {
         "inductive_limit_pct": float(row[0]),
         "capacitive_limit_pct": float(row[1]),
@@ -3096,6 +3101,11 @@ def _read_tariff(device_id: str, cur) -> dict:
         "contract_power_kw": float(row[12]) if row[12] is not None else None,
         "demand_price": float(row[13]),
         "configured": True,
+        # Rakamlar faturadan mi geldi yoksa yaklasik mi. Panel, PDF ve aylik
+        # e-posta bunu acikca yaziyor -- kesin tutar gibi gorunen bir tahmin,
+        # tutar hic gostermemekten daha kotu.
+        "tariff_verified": bool(row[14]),
+        "tariff_source": row[15]
     }
 
 
@@ -3246,8 +3256,9 @@ def set_tariff(device_id: str, payload: TariffRequest, user: str = Depends(requi
                                    t1_start, t2_start, t3_start,
                                    t1_price, t2_price, t3_price,
                                    contract_power_kw, demand_price,
+                                   tariff_verified, tariff_source,
                                    updated_at, updated_by)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), %s)
         ON CONFLICT (device_id) DO UPDATE SET
             inductive_limit_pct = EXCLUDED.inductive_limit_pct,
             capacitive_limit_pct = EXCLUDED.capacitive_limit_pct,
@@ -3262,13 +3273,16 @@ def set_tariff(device_id: str, payload: TariffRequest, user: str = Depends(requi
             t3_price = EXCLUDED.t3_price,
             contract_power_kw = EXCLUDED.contract_power_kw,
             demand_price = EXCLUDED.demand_price,
+            tariff_verified = EXCLUDED.tariff_verified,
+            tariff_source = EXCLUDED.tariff_source,
             updated_at = now(),
             updated_by = EXCLUDED.updated_by
     """, (device_id, payload.inductive_limit_pct, payload.capacitive_limit_pct,
           payload.reactive_price, payload.active_price, payload.billing_mode,
           payload.t1_start, payload.t2_start, payload.t3_start,
           payload.t1_price, payload.t2_price, payload.t3_price,
-          payload.contract_power_kw, payload.demand_price, user))
+          payload.contract_power_kw, payload.demand_price,
+          payload.tariff_verified, payload.tariff_source, user))
     conn.commit()
     cur.close()
     conn.close()
@@ -3905,6 +3919,33 @@ def build_monthly_pdf(device_id: str, year: int, month: int) -> bytes:
     # Sayfa tasmasi olursa devam sayfasi acabilmek icin gereken baglam.
     ctx = {"W": W, "H": H, "L": L, "R": R, "INK": INK, "MUTED": MUTED, "AMBER": AMBER,
            "device_name": info["name"], "period": f"{TR_MONTHS[month - 1]} {year}"}
+
+    # Tarife faturadan dogrulanmadiysa raporun EN USTUNDE soyle. Rapor
+    # e-postayla gidiyor ve PDF olarak saklaniyor -- okuyanin, rakamlarin
+    # yaklasik oldugunu panele donup kontrol etmeden gormesi gerekiyor.
+    if priced and not tariff.get("tariff_verified"):
+        kaynak = (tariff.get("tariff_source") or "").strip()
+        # Kaynak ayri SATIRA yaziliyor. Once basligin sagina hizalanmisti ve
+        # uzun kaynak metni basligin uzerine binip kelimeyi ortadan kesiyordu.
+        kutu_h = 13 * mm if kaynak else 9 * mm
+        c.setFillColor(AMBER)
+        c.rect(L, y + 3 * mm, R - L, kutu_h, fill=1, stroke=0)
+        c.setFillColor(colors.white)
+        c.setFont(REPORT_FONT_BOLD, 9)
+        ust = y + 3 * mm + kutu_h - 4.2 * mm
+        c.drawString(L + 3 * mm, ust, "TARİFE DOĞRULANMADI — TUTARLAR TAHMİNİDİR")
+        if kaynak:
+            c.setFont(REPORT_FONT, 7)
+            # Karakter genisligini TAHMIN etmek yerine olc: tahminle kesince
+            # metin kutunun kenarina dayaniyordu.
+            sigan = R - L - 6 * mm
+            metin = kaynak
+            while metin and c.stringWidth(metin, REPORT_FONT, 7) > sigan:
+                metin = metin[:-1]
+            if metin != kaynak and len(metin) > 1:
+                metin = metin[:-1] + "…"
+            c.drawString(L + 3 * mm, ust - 4.2 * mm, metin)
+        y -= (kutu_h + 1 * mm)
 
     # ---------------- Öne çıkan rakam ----------------
     ceza_toplam = row["demand_cost"] + row["reactive_cost"]
