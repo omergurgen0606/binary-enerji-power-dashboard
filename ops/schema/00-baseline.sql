@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict UAYAPYzOKzqHFE7NIDHeVcrd8MnvfvGT5WyZnxtU6W3KT6lLsupKBVGWxXeCdty
+\restrict 9rC69zfnSDGc8lCsNSGQ6obTIhWlph3XatBoLrJSmPOtjvNTWG4c3DtrIzFzMzt
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -417,6 +417,26 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thvd1 SET STATISTICS 0;
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thvd2 SET STATISTICS 0;
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thvd3 SET STATISTICS 0;
+
+
+--
+-- Name: _hyper_1_24_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_24_chunk (
+    CONSTRAINT constraint_24 CHECK ((("time" >= '2026-08-31 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-09-01 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.measurements);
+
+
+--
+-- Name: _hyper_1_25_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE TABLE _timescaledb_internal._hyper_1_25_chunk (
+    CONSTRAINT constraint_25 CHECK ((("time" >= '2026-09-01 00:00:00+00'::timestamp with time zone) AND ("time" < '2026-09-02 00:00:00+00'::timestamp with time zone)))
+)
+INHERITS (public.measurements);
 
 
 --
@@ -1369,7 +1389,9 @@ CREATE TABLE public.device_tariff (
     t2_price numeric DEFAULT 0 NOT NULL,
     t3_price numeric DEFAULT 0 NOT NULL,
     contract_power_kw numeric,
-    demand_price numeric DEFAULT 0 NOT NULL
+    demand_price numeric DEFAULT 0 NOT NULL,
+    tariff_verified boolean DEFAULT false NOT NULL,
+    tariff_source text
 );
 
 
@@ -1902,6 +1924,20 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk ALTER COLUMN "time" SET 
 
 
 --
+-- Name: _hyper_1_24_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_24_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
+-- Name: _hyper_1_25_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+--
+
+ALTER TABLE ONLY _timescaledb_internal._hyper_1_25_chunk ALTER COLUMN "time" SET DEFAULT now();
+
+
+--
 -- Name: _hyper_1_2_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
 --
 
@@ -2395,6 +2431,34 @@ CREATE INDEX _hyper_1_1_chunk_measurements_device_time_idx ON _timescaledb_inter
 --
 
 CREATE INDEX _hyper_1_1_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_1_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_1_24_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_24_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_24_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_1_24_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_24_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_24_chunk USING btree ("time" DESC);
+
+
+--
+-- Name: _hyper_1_25_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_25_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_25_chunk USING btree (device_id, "time" DESC);
+
+
+--
+-- Name: _hyper_1_25_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+--
+
+CREATE INDEX _hyper_1_25_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_25_chunk USING btree ("time" DESC);
 
 
 --
@@ -2993,5 +3057,5 @@ ALTER TABLE ONLY public.subscriptions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict UAYAPYzOKzqHFE7NIDHeVcrd8MnvfvGT5WyZnxtU6W3KT6lLsupKBVGWxXeCdty
+\unrestrict 9rC69zfnSDGc8lCsNSGQ6obTIhWlph3XatBoLrJSmPOtjvNTWG4c3DtrIzFzMzt
 

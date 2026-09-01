@@ -616,6 +616,21 @@ Açık olan yalnızca **cihaz tarafıydı**: API broker'a docker ağından (`MQT
 
 Firmware IP yerine `binaryenerji.com`'a bağlanıyor — sertifika alan adına düzenlenmiş, IP host doğrulamasını kırar. Kök olarak ISRG Root X1 gömülü. Beş kez üst üste doğrulama başarısız olursa doğrulanmamış TLS'e düşüyor: sahada erişilemez bir cihaz, zayıf doğrulanmış bir bağlantıdan kötüdür.
 
+## 8.8. Tarife Doğrulama İşareti
+
+Sistem tarife konusunda ikiliydi: ya gerçek fiyat vardı ya hiç ₺ gösterilmiyordu. Arası yoktu.
+
+Bu boşluk **gerçek bir hataya yol açtı**: geliştirme sırasında girilen uydurma rakamlar panelde günlerce gerçek fatura tutarı gibi durdu ve fark edilmedi. Aynı boşluk her yeni müşteride tekrarlanacaktı — kurulum günü kimse faturasını elinde tutmuyor.
+
+`device_tariff` tablosunda iki alan:
+
+- `tariff_verified` — rakamlar faturadan doğrulandı mı (varsayılan **false**)
+- `tariff_source` — serbest metin: *"Fatura, Ağustos 2026"* ya da *"yaklaşık — EPDK genel üç zamanlı, Nisan 2026"*
+
+Kaynak metni bilerek serbest: **bir sayıya bakıp nereden geldiğini bilememek, sayının kendisinden daha tehlikeli.**
+
+Doğrulanmamışsa tutar gösteren **her yer** bunu söylüyor: panel (web/iOS/Android fatura bölümü), PDF rapor (sayfanın en üstünde), ve aylık e-posta. PDF'te uyarı iki satır — başlık ve kaynak; tek satırda kaynak metni başlığın üzerine biniyordu. Kaynak `stringWidth` ile ölçülerek kırpılıyor, karakter genişliği tahminiyle değil.
+
 ## 9. Dağıtım ve Staging Ortamı
 
 **Neden var:** 28 Ağustos 2026'da bağlantı havuzu hatası doğrudan üretime gitti ve 22 yazma uç noktası sessizce yazdıklarını atmaya başladı (bkz. bölüm 8). Hata yalnızca gerçek bir çalışan süreçte görünüyordu — birim testi değil, çalışan bir ortam gerekiyordu.

@@ -3302,6 +3302,8 @@ function BillSection({ token, device }) {
             )}
           </div>
 
+          {priced && <TarifeDogrulanmadiUyarisi tariff={tariff} />}
+
           {!priced && (
             <div style={{
               fontSize: 12, color: 'var(--muted)', marginBottom: 16, padding: '10px 12px',
@@ -3480,6 +3482,8 @@ function TariffForm({ token, device, tariff, onSaved }) {
     t3_price: tariff.t3_price,
     contract_power_kw: tariff.contract_power_kw ?? '',
     demand_price: tariff.demand_price,
+    tariff_verified: tariff.tariff_verified ?? false,
+    tariff_source: tariff.tariff_source ?? '',
   });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -3514,6 +3518,8 @@ function TariffForm({ token, device, tariff, onSaved }) {
         // Bos birakilirsa sozlesme gucu "girilmedi" demek -- 0 degil null.
         contract_power_kw: form.contract_power_kw === '' ? null : Number(form.contract_power_kw),
         demand_price: Number(form.demand_price),
+        tariff_verified: !!form.tariff_verified,
+        tariff_source: form.tariff_source.trim() || null,
       }, { headers: { Authorization: `Bearer ${token}` } });
       setMsg('Kaydedildi.');
       onSaved();
@@ -3636,6 +3642,33 @@ function TariffForm({ token, device, tariff, onSaved }) {
           </select>
         </div>
       </div>
+
+      <label style={{
+        display: 'flex', gap: 8, alignItems: 'flex-start', marginTop: 16,
+        fontSize: 12, lineHeight: 1.5, cursor: 'pointer',
+      }}>
+        <input
+          type="checkbox"
+          checked={!!form.tariff_verified}
+          onChange={(e) => set('tariff_verified', e.target.checked)}
+          style={{ marginTop: 2 }}
+        />
+        <span>
+          <b>Bu rakamlar faturadan doğrulandı.</b> İşaretlenmezse panel, PDF rapor ve
+          aylık e-posta “tutarlar tahminidir” uyarısı gösterir.
+        </span>
+      </label>
+      <input
+        value={form.tariff_source}
+        onChange={(e) => set('tariff_source', e.target.value)}
+        placeholder="Rakamların kaynağı (ör. Fatura, Ağustos 2026)"
+        maxLength={120}
+        style={{
+          marginTop: 8, width: '100%', boxSizing: 'border-box', padding: '7px 9px',
+          borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+          background: 'var(--bg)', color: 'var(--ink)', fontSize: 12,
+        }}
+      />
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 12 }}>
         <button type="button" onClick={save} disabled={saving} style={{
@@ -4326,6 +4359,30 @@ function WifiBox({ token, device, connected }) {
           )}
         </>
       )}
+    </div>
+  );
+}
+
+// Tarife faturadan doğrulanmadıysa, tutar gösteren HER yerde bunu açıkça söyle.
+// Bu boşluk gerçek bir hataya yol açtı: geliştirme sırasında girilen uydurma
+// rakamlar panelde günlerce gerçek fatura tutarı gibi durdu. Sayının kendisinden
+// çok, nereden geldiğini bilememek tehlikeli.
+function TarifeDogrulanmadiUyarisi({ tariff }) {
+  if (!tariff || tariff.tariff_verified) return null;
+  return (
+    <div style={{
+      display: 'flex', gap: 8, alignItems: 'flex-start',
+      fontSize: 12, marginBottom: 14, padding: '9px 12px',
+      borderRadius: 'var(--radius-sm)',
+      border: '1px solid var(--warn)', color: 'var(--ink)',
+    }}>
+      <span aria-hidden="true">⚠</span>
+      <span>
+        <b>Tarife doğrulanmadı — tutarlar tahminidir.</b>{' '}
+        {tariff.tariff_source ? <>Kaynak: {tariff.tariff_source}. </> : null}
+        Faturanızdaki gerçek birim fiyatları <b>Tarife</b> bölümünden girip
+        “faturadan doğrulandı” işaretini koyduğunuzda bu uyarı kalkar.
+      </span>
     </div>
   );
 }
