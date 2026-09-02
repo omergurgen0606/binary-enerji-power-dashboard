@@ -93,3 +93,52 @@ def uye_ekle(db, org_id, username, role, tesisler=(), bolumler=()):
     for b in bolumler:
         db.execute("INSERT INTO member_departments (member_id, department_id) VALUES (%s,%s)", (uye_id, b))
     return uye_id
+
+
+# ---------------------------------------------------------------------------
+# Uç nokta testleri için: gerçek SQL, testin kendi işlemi içinde
+# ---------------------------------------------------------------------------
+
+class _SahteImlec:
+    """Testin imlecini aynen kullanır ama close() çağrısını yutar.
+
+    Uç nokta fonksiyonları finally bloğunda cur.close() çağırıyor. Sarmalanmasa
+    testin imleci ilk çağrıda kapanır ve doğrulama satırları
+    "cursor already closed" ile patlar.
+    """
+    def __init__(self, cur):
+        self._cur = cur
+
+    def close(self):
+        pass
+
+    def __getattr__(self, ad):
+        return getattr(self._cur, ad)
+
+
+class _SahteBaglanti:
+    """db_connect() yerine geçer: uç nokta gerçek SQL'i gerçek şemaya karşı
+    çalıştırsın, ama commit yutulsun.
+
+    Böylece conftest'in "her test geri alınır" koruması geçerli kalıyor --
+    gerçek bir bağlantı açılsaydı test kalıcı iz bırakırdı.
+    """
+    def __init__(self, cur):
+        self._imlec = _SahteImlec(cur)
+
+    def cursor(self):
+        return self._imlec
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        pass
+
+    def close(self):
+        pass
+
+
+def sahte_db_connect(cur):
+    """monkeypatch.setattr(api, "db_connect", sahte_db_connect(db)) için."""
+    return lambda: _SahteBaglanti(cur)
