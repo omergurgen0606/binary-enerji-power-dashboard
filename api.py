@@ -253,7 +253,9 @@ app.add_middleware(
     # auth Bearer-token oldugu icin (cookie degil) CORS zaten CSRF vektoru degildi,
     # ama "*" gereksiz yere genisti -- gercek origin'lere daraltildi. localhost:5173
     # yerel Vite dev server icin (bu API'ye karsi test ederken kullaniliyor).
-    allow_origins=[SITE_URL, "http://localhost:5173"],
+    # localhost:3000 -> Next.js arayuz pilotu (mevcut panele dokunmadan,
+    # ayni API uzerinde yan yana karsilastirma icin).
+    allow_origins=[SITE_URL, "http://localhost:5173", "http://localhost:3000"],
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
@@ -550,6 +552,9 @@ def add_device(payload: AddDeviceRequest, user: str = Depends(require_auth)):
     finally:
         cur.close()
         conn.close()
+    # Girişteki kayıtlı-cihaz önbelleğine hemen ekle: aksi halde yeni eklenen
+    # cihazın ilk ölçümleri, negatif önbellek süresi dolana kadar düşerdi.
+    kayitli_cihaz_ekle(device_id)
     audit("device.add", actor=user, organization_id=membership["organization_id"],
           entity_type="device", entity_id=device_id, detail={"ad": name})
     return {"message": "Cihaz eklendi"}
@@ -592,20 +597,185 @@ def department_belongs_to(department_id: int, facility_id: int) -> bool:
     conn.close()
     return row is not None
 
-@app.delete("/devices/{device_id}")
-def remove_device(device_id: str, user: str = Depends(require_auth)):
+# ---------------------------------------------------------------------------
+# Cihazı tümüyle silme
+#
+# Bir cihazın verisi tek tabloda durmuyor: ölçümler, enerji, sistem özeti, tepe
+# değerleri, demand, harmonikler, cihaz bilgisi, ayarlar, tarife ve alarmlar
+# ayrı tablolarda. "Sil" dendiğinde bunların HEPSİ gitmeli. Eksik bırakılan her
+# tablo, silindiği söylenen cihazın verisinin veritabanında durmaya devam etmesi
+# demek -- kullanıcıya verilen sözün de KVKK'nın da karşılamadığı bir durum.
+#
+# Yeni bir device_id tablosu eklendiğinde buraya da eklenmeli.
+# tests/test_cihaz_silme.py bu listeyi CANLI ŞEMAYA karşı doğruluyor: unutulan
+# bir tablo testi kırar, sessizce yarım silmeye dönüşmez.
+CIHAZ_VERI_TABLOLARI = (
+    "measurements",
+    "device_energy",
+    "device_stats",
+    "device_peaks",
+    "device_demand",
+    "device_harmonics",
+    "device_info",
+    "device_settings",
+    "device_tariff",
+    "alarm_events",
+    "alarm_rules",
+)
+
+# Ham satırları silmek sürekli toplamaları GÜNCELLEMEZ (TimescaleDB). Bu adım
+# atlanırsa silinen cihazın saatlik enerjisi ve 10/15 dakikalık özetleri
+# veritabanında kalmaya devam eder.
+CIHAZ_SUREKLI_TOPLAMALAR = ("measurements_15min", "measurements_10min", "device_energy_hourly")
+
+
+def _cihaz_veri_sayimi(device_id: str, cur) -> dict:
+    """Cihazın her tablodaki satır sayısı.
+
+    Tablo adları sabit demetten geliyor (kullanıcı girdisi değil), bu yüzden
+    doğrudan sorguya konabiliyor; device_id yine parametreli.
+    """
+    sayim = {}
+    for tablo in CIHAZ_VERI_TABLOLARI:
+        cur.execute(f"SELECT count(*) FROM {tablo} WHERE device_id = %s", (device_id,))
+        sayim[tablo] = cur.fetchone()[0]
+    return sayim
+
+
+def _surekli_toplamalari_yenile(ilk, son) -> None:
+    """Silinen cihazın kovalarını sürekli toplamalardan düşürür.
+
+    Ayrı bir iş parçacığında çalışıyor: sıkıştırılmış chunk'ları kapsayan bir
+    yenileme dakikalar sürebiliyor ve HTTP isteğini nginx'in zaman aşımına
+    düşürürdü -- kullanıcı silmenin başarısız olduğunu sanırdı, oysa ham veri
+    çoktan silinmiş olurdu. Ham veri gittiği için bu kovalara API'den zaten
+    erişilemiyor (her uç nokta sahipliği devices tablosundan doğruluyor, o kayıt
+    da silindi); bu adım onları fiziksel olarak da temizliyor.
+    """
+    try:
+        conn = db_connect()
+        conn.autocommit = True  # refresh_continuous_aggregate işlem bloğunda çalışamaz
+        cur = conn.cursor()
+        for gorunum in CIHAZ_SUREKLI_TOPLAMALAR:
+            try:
+                cur.execute("CALL refresh_continuous_aggregate(%s, %s, %s)", (gorunum, ilk, son))
+            except Exception as e:
+                logger.error("Sürekli toplam yenilenemedi (%s): %s", gorunum, e)
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.error("Sürekli toplam yenileme bağlantısı kurulamadı: %s", e)
+
+
+@app.get("/devices/{device_id}/delete-preview")
+def delete_device_preview(device_id: str, user: str = Depends(require_auth)):
+    """Silinecek olan şeyi sayılarla gösterir.
+
+    Geri alınamaz bir işlemi soyut bırakmamak için: kullanıcı "42 günlük 146.203
+    ölçüm silinecek" yazısını görerek onaylıyor, "cihazı sil" ifadesine
+    güvenerek değil.
+    """
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
     conn = db_connect()
-    conn.autocommit = True
     cur = conn.cursor()
-    # Ölçüm geçmişi bilerek silinmiyor — sadece kayıt kaldırılıyor. Cihaz veri
-    # göndermeye devam ederse sahipsiz kalır, tekrar kurulum koduyla eklenebilir.
-    # Erişim zaten yukarıda is_device_owner ile doğrulandı.
-    cur.execute("DELETE FROM devices WHERE device_id = %s", (device_id,))
-    cur.close()
-    conn.close()
-    return {"message": "Cihaz kaldırıldı"}
+    try:
+        sayim = _cihaz_veri_sayimi(device_id, cur)
+        cur.execute("SELECT min(time), max(time) FROM measurements WHERE device_id = %s", (device_id,))
+        ilk, son = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    return {
+        "tablolar": sayim,
+        "toplam_satir": sum(sayim.values()),
+        "ilk_veri": ilk.isoformat() if ilk else None,
+        "son_veri": son.isoformat() if son else None,
+        "gun_sayisi": (son - ilk).days if ilk and son else 0,
+    }
+
+
+class DeleteDeviceRequest(BaseModel):
+    password: str
+    confirm: str   # cihaz adını yazarak onaylama
+
+
+@app.post("/devices/{device_id}/delete")
+def delete_device(device_id: str, payload: DeleteDeviceRequest,
+                  user: str = Depends(require_auth), request: Request = None):
+    """Cihazı ve TÜM ölçüm geçmişini kalıcı olarak siler.
+
+    Hesap silmeyle (/me/delete) aynı korumalar: cihaz adını yazarak onay, hesap
+    şifresinin yeniden girilmesi ve hız sınırı. Şifre şart, çünkü JWT 30 gün
+    geçerli ve iptal edilemiyor -- çalınan bir token tek başına bir müşterinin
+    aylarca birikmiş ölçüm geçmişini yok edebilmemeli.
+
+    Silme işlemi TEK BİR İŞLEMDE: tabloların bir kısmı silinip diğerleri kalırsa
+    ortaya ne silinmiş ne duran, tutarsız bir cihaz çıkar. Hata olursa hepsi
+    geri alınır.
+
+    Denetim kaydı SİLİNMEZ ve silinen satır sayılarını içerir: "bu cihaz ne
+    zaman, kim tarafından, ne kadar veriyle silindi" sorusu sonradan
+    cevaplanabilmeli.
+    """
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+
+    conn = db_connect()
+    cur = conn.cursor()
+    try:
+        cur.execute("SELECT name FROM devices WHERE device_id = %s", (device_id,))
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Cihaz bulunamadı")
+        cihaz_adi = row[0]
+
+        if payload.confirm.strip() != cihaz_adi:
+            raise HTTPException(status_code=400, detail="Onay için cihazın adını doğru yazmalısınız")
+
+        check_rate_limit(f"cihazsil:{user}", max_attempts=5, window_seconds=60 * 60)
+
+        cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
+        prow = cur.fetchone()
+        if not prow or not bcrypt.checkpw(payload.password.encode(), prow[0].encode()):
+            raise HTTPException(status_code=403, detail="Şifre hatalı")
+
+        sayim = _cihaz_veri_sayimi(device_id, cur)
+        cur.execute("SELECT min(time), max(time) FROM measurements WHERE device_id = %s", (device_id,))
+        ilk, son = cur.fetchone()
+
+        for tablo in CIHAZ_VERI_TABLOLARI:
+            cur.execute(f"DELETE FROM {tablo} WHERE device_id = %s", (device_id,))
+
+        audit("device.delete", actor=user, entity_type="device", entity_id=device_id,
+              detail={"cihaz_adi": cihaz_adi, "silinen_satirlar": sayim,
+                      "toplam_satir": sum(sayim.values())},
+              request=request, cur=cur)
+
+        cur.execute("DELETE FROM devices WHERE device_id = %s", (device_id,))
+        conn.commit()
+    except HTTPException:
+        conn.rollback()
+        raise
+    except Exception as e:
+        conn.rollback()
+        logger.error("Cihaz silme hatasi (%s): %s", device_id, e)
+        raise HTTPException(status_code=500, detail="Cihaz silinemedi")
+    finally:
+        cur.close()
+        conn.close()
+
+    # Cihaz hâlâ enerjiliyse yayın yapmaya devam eder; bu satır olmadan silinen
+    # cihaz saniyeler içinde kendini yeniden yazmaya başlar.
+    kayitli_cihaz_unut(device_id)
+    device_status.pop(device_id, None)
+    device_wifi_result.pop(device_id, None)
+
+    if ilk and son:
+        threading.Thread(target=_surekli_toplamalari_yenile, args=(ilk, son), daemon=True).start()
+
+    return {"message": f"{cihaz_adi} ve tüm ölçüm geçmişi silindi.",
+            "silinen_satir": sum(sayim.values())}
 
 class RenameDeviceRequest(BaseModel):
     name: str
@@ -1805,6 +1975,16 @@ def trigger_ota(device_id: str, user: str = Depends(require_auth)):
         "version": version,
         "sha256": sha256,
     })
+    # Cevrimdisi cihaza OTA gondermek sessizce hicbir sey yapmaz: MQTT'de kuyruk
+    # yok ve cihaz temiz oturumla baglaniyor, yani o anda bagli degilse mesaj
+    # kayboluyor. Ilk gercek OTA denemesi tam boyle bosa gitti -- panel
+    # "tetiklendi" dedi, cihaz dosyayi hic indirmedi.
+    durum = device_status.get(device_id)
+    if not durum or durum.get("status") != "online":
+        raise HTTPException(
+            status_code=409,
+            detail="Cihaz şu anda çevrimiçi değil. OTA yalnızca bağlı bir cihaza gönderilebilir.")
+
     try:
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2)
         client.username_pw_set(MQTT_USER, MQTT_PASSWORD)
@@ -1813,12 +1993,14 @@ def trigger_ota(device_id: str, user: str = Depends(require_auth)):
         client.connect(MQTT_BROKER, 1883, 10)
         client.loop_start()
         connected_evt.wait(timeout=5)
-        client.publish(f"{MQTT_TOPIC_PREFIX}/{device_id}/ota", payload)
-        time.sleep(0.3)
+        # QoS 1 + onay bekleme: QoS 0 "gonder ve unut" demekti, broker mesaji
+        # aldigini bile teyit etmiyordu.
+        info = client.publish(f"{MQTT_TOPIC_PREFIX}/{device_id}/ota", payload, qos=1)
+        info.wait_for_publish(timeout=5)
         client.loop_stop()
         client.disconnect()
     except Exception as e:
-        print("OTA tetikleme hatasi:", e)
+        logger.error("OTA tetikleme hatasi (%s): %s", device_id, e)
         raise HTTPException(status_code=502, detail="OTA komutu cihaza gönderilemedi")
     return {"message": "OTA güncellemesi tetiklendi", "version": version}
 
@@ -5061,6 +5243,68 @@ device_status: dict[str, dict] = {}  # device_id -> {"status": "online"|"offline
 # bellekte tutuluyor. ASLA SSID/parola saklanmiyor, yalnizca sonuc.
 device_wifi_result: dict[str, dict] = {}
 
+# ---------- MQTT girişi: yalnızca kayıtlı cihazların verisi yazılır ----------
+#
+# Bu koruma olmadan "cihazı sil" gerçek bir silme olamaz: cihaz hâlâ enerjiliyse
+# silindikten saniyeler sonra aynı satırları yeniden yazmaya başlar ve kullanıcı
+# silmenin çalışmadığını görür.
+#
+# İkinci bir faydası: broker kimlik bilgisi tüm cihazlarda ortak olduğu için,
+# kayıtlı olmayan bir device_id ile yayın yapan herhangi bir cihaz veritabanına
+# sınırsız yazabiliyordu. Artık yazamıyor.
+_kayitli_cihazlar: set[str] = set()
+_kayitli_cihaz_kilidi = threading.Lock()
+_bilinmeyen_cihaz_son_kontrol: dict[str, float] = {}
+BILINMEYEN_CIHAZ_KONTROL_ARALIGI = 60  # saniye
+
+
+def kayitli_cihaz_ekle(device_id: str) -> None:
+    with _kayitli_cihaz_kilidi:
+        _kayitli_cihazlar.add(device_id)
+        _bilinmeyen_cihaz_son_kontrol.pop(device_id, None)
+
+
+def kayitli_cihaz_unut(device_id: str) -> None:
+    with _kayitli_cihaz_kilidi:
+        _kayitli_cihazlar.discard(device_id)
+        # Negatif kaydı da temizliyoruz ki silinen cihaz tekrar eklenirse
+        # verisi bir dakika beklemeden kabul edilsin.
+        _bilinmeyen_cihaz_son_kontrol.pop(device_id, None)
+
+
+def kayitli_cihaz_mi(device_id: str) -> bool:
+    """Önbellek pozitif tarafta kalıcı, negatif tarafta süreli.
+
+    Kayıtlı cihaz bir kez doğrulanınca bir daha sorgu açtırmıyor; kayıtlı
+    olmayan bir cihaz ise her mesajda değil, dakikada bir kez soruluyor --
+    aksi halde yayında kalan silinmiş bir cihaz saniyede bir sorgu açardı.
+
+    Veritabanına ulaşılamazsa VERİ KABUL EDİLİR: geçici bir arıza yüzünden
+    gerçek ölçüm kaybetmek, birkaç fazla satırdan çok daha kötü.
+    """
+    with _kayitli_cihaz_kilidi:
+        if device_id in _kayitli_cihazlar:
+            return True
+        son_kontrol = _bilinmeyen_cihaz_son_kontrol.get(device_id)
+    if son_kontrol is not None and time.time() - son_kontrol < BILINMEYEN_CIHAZ_KONTROL_ARALIGI:
+        return False
+    try:
+        conn = db_connect()
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM devices WHERE device_id = %s", (device_id,))
+        kayitli = cur.fetchone() is not None
+        cur.close()
+        conn.close()
+    except Exception as e:
+        logger.warning("Cihaz kaydı doğrulanamadı (%s): %s -- veri kabul ediliyor", device_id, e)
+        return True
+    if kayitli:
+        kayitli_cihaz_ekle(device_id)
+    else:
+        with _kayitli_cihaz_kilidi:
+            _bilinmeyen_cihaz_son_kontrol[device_id] = time.time()
+    return kayitli
+
 def _websocket_subscription_ok(username: str) -> bool:
     conn = db_connect()
     cur = conn.cursor()
@@ -5261,6 +5505,8 @@ def mqtt_thread():
             parts = msg.topic.split("/")
             if len(parts) == 4:
                 device_id, category, subtype = parts[1], parts[2], parts[3]
+                if not kayitli_cihaz_mi(device_id):
+                    return
                 data = json.loads(msg.payload.decode())
                 if category == "peaks":
                     handle_peaks(device_id, subtype, data)
@@ -5272,6 +5518,11 @@ def mqtt_thread():
 
             device_id = device_id_from_topic(msg.topic)
             if not device_id:
+                return
+            # Kayıtlı olmayan (ya da silinmiş) cihazın hiçbir mesajı işlenmiyor --
+            # ölçümü de, durumu da. Silinen bir cihaz panelde "çevrimiçi" olarak
+            # yeniden belirmemeli.
+            if not kayitli_cihaz_mi(device_id):
                 return
             if msg.topic.endswith("/status"):
                 handle_status(device_id, msg.payload.decode())
