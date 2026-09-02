@@ -4237,6 +4237,148 @@ const CT_RATIO_TABLE = [
   7500, 8000, 8500, 10000,
 ];
 
+// ---------- Cihazı tümüyle sil ----------
+//
+// Ayarların en altında, kendi çerçevesinde duruyor: yanlışlıkla tıklanacak bir
+// yerde değil, ama aranınca bulunacak yerde. Onay iki adımlı (cihaz adı +
+// hesap şifresi) ve önce SİLİNECEK OLAN GÖSTERİLİYOR -- kullanıcı "cihazı sil"
+// ifadesine değil, "146.203 ölçüm, 42 gün" sayısına bakarak onaylıyor.
+function DeleteDeviceBox({ token, device, onDeleted }) {
+  const [acik, setAcik] = useState(false);
+  const [onizleme, setOnizleme] = useState(null);
+  const [onayAdi, setOnayAdi] = useState('');
+  const [sifre, setSifre] = useState('');
+  const [siliniyor, setSiliniyor] = useState(false);
+  const [hata, setHata] = useState(null);
+
+  useEffect(() => {
+    if (!acik) return;
+    let iptal = false;
+    axios.get(`${API_BASE}/devices/${device.device_id}/delete-preview`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => { if (!iptal) setOnizleme(res.data); })
+      .catch(() => { if (!iptal) setOnizleme(null); });
+    return () => { iptal = true; };
+  }, [acik, device.device_id, token]);
+
+  async function sil() {
+    setSiliniyor(true);
+    setHata(null);
+    try {
+      await axios.post(`${API_BASE}/devices/${device.device_id}/delete`,
+        { password: sifre, confirm: onayAdi.trim() },
+        { headers: { Authorization: `Bearer ${token}` } });
+      // Cihaz listesi yenilenince seçili cihaz kaybolur ve panel kendiliğinden
+      // listeye döner -- ayrıca yönlendirme yapmaya gerek yok.
+      onDeleted?.();
+    } catch (err) {
+      setHata(err.response?.data?.detail || 'Cihaz silinemedi.');
+      setSiliniyor(false);
+    }
+  }
+
+  const hazir = onayAdi.trim() === device.name && sifre && !siliniyor;
+
+  return (
+    <div style={{
+      marginTop: 16, padding: '12px 14px', borderRadius: 'var(--radius-sm)',
+      border: '1px solid var(--danger)', display: 'flex', flexDirection: 'column', gap: 10,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--danger)' }}>Cihazı Tümüyle Sil</span>
+          <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+            Cihaz ve tüm ölçüm geçmişi kalıcı olarak silinir. Geri alınamaz.
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={() => { setAcik((o) => !o); setHata(null); }}
+          style={{
+            padding: '6px 14px', borderRadius: 'var(--radius-xs)',
+            border: '1px solid var(--danger)', background: 'none', color: 'var(--danger)',
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap',
+          }}
+        >
+          {acik ? 'Vazgeç' : 'Sil…'}
+        </button>
+      </div>
+
+      {acik && (
+        <div style={{ background: 'var(--bg)', borderRadius: 'var(--radius-xs)', padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {onizleme ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: 12, fontWeight: 600 }}>Silinecek veriler</span>
+              <span style={{ fontSize: 12, color: 'var(--muted)', lineHeight: 1.6 }}>
+                <strong style={{ color: 'var(--ink)' }}>{onizleme.toplam_satir.toLocaleString('tr-TR')}</strong> kayıt
+                {onizleme.gun_sayisi > 0 && <> · <strong style={{ color: 'var(--ink)' }}>{onizleme.gun_sayisi}</strong> günlük geçmiş</>}
+              </span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 12px', marginTop: 4 }}>
+                {Object.entries(onizleme.tablolar)
+                  .filter(([, n]) => n > 0)
+                  .map(([tablo, n]) => (
+                    <span key={tablo} style={{ fontSize: 11, color: 'var(--muted)' }}>
+                      {TABLO_ADLARI[tablo] || tablo}: {n.toLocaleString('tr-TR')}
+                    </span>
+                  ))}
+              </div>
+            </div>
+          ) : (
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>Silinecek veriler hesaplanıyor…</span>
+          )}
+
+          <span style={{ fontSize: 11, color: 'var(--danger)', lineHeight: 1.5 }}>
+            Onaylamak için cihazın adını (<strong>{device.name}</strong>) ve hesap şifrenizi yazın.
+          </span>
+          <input
+            type="text"
+            value={onayAdi}
+            onChange={(e) => setOnayAdi(e.target.value)}
+            placeholder={device.name}
+            style={{ ...inputStyle, fontSize: 13, padding: '7px 10px' }}
+          />
+          <input
+            type="password"
+            value={sifre}
+            onChange={(e) => setSifre(e.target.value)}
+            placeholder="Hesap şifreniz"
+            style={{ ...inputStyle, fontSize: 13, padding: '7px 10px' }}
+          />
+          <button
+            type="button"
+            disabled={!hazir}
+            onClick={sil}
+            style={{
+              padding: '9px 12px', borderRadius: 'var(--radius-xs)', border: 'none',
+              background: 'var(--danger)', color: '#fff', fontSize: 12, fontWeight: 700,
+              cursor: hazir ? 'pointer' : 'default', opacity: hazir ? 1 : 0.5,
+            }}
+          >
+            {siliniyor ? 'Siliniyor…' : 'Cihazı ve tüm geçmişini sil'}
+          </button>
+          {hata && <span style={{ fontSize: 11, color: 'var(--danger)' }}>{hata}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Önizlemedeki tablo adları teknik; kullanıcı "device_peaks" değil "tepe
+// değerleri" görmeli.
+const TABLO_ADLARI = {
+  measurements: 'Ölçümler',
+  device_energy: 'Enerji kayıtları',
+  device_stats: 'Sistem özeti',
+  device_peaks: 'Tepe değerleri',
+  device_demand: 'Demand',
+  device_harmonics: 'Harmonikler',
+  device_info: 'Cihaz bilgisi',
+  device_settings: 'Ayarlar',
+  device_tariff: 'Tarife',
+  alarm_events: 'Alarm kayıtları',
+  alarm_rules: 'Alarm kuralları',
+};
+
 function WifiBox({ token, device, connected }) {
   const [ssid, setSsid] = useState('');
   const [pass, setPass] = useState('');
@@ -4696,7 +4838,7 @@ function DashboardTabs({ active, onChange, alarmCount }) {
   );
 }
 
-function DeviceDashboard({ token, device, tab, onTabChange, onBack, onLogout, theme, subscription }) {
+function DeviceDashboard({ token, device, tab, onTabChange, onBack, onLogout, theme, subscription, onDeviceDeleted }) {
   const [connected, setConnected] = useState(false);
   const [lastMessageAt, setLastMessageAt] = useState(null);
   const [esp32Status, setEsp32Status] = useState(null); // 'online' | 'offline' | null (henüz bilinmiyor)
@@ -5019,6 +5161,7 @@ function DeviceDashboard({ token, device, tab, onTabChange, onBack, onLogout, th
                   </span>
                 </div>
               )}
+              <DeleteDeviceBox token={token} device={device} onDeleted={onDeviceDeleted} />
             </div>
           )}
         </div>
@@ -5309,6 +5452,7 @@ export default function App() {
           onLogout={handleLogout}
           theme={theme}
           subscription={subscription}
+          onDeviceDeleted={refreshDevices}
         />
         <Footer />
       </>
