@@ -11,7 +11,10 @@ services:
       - "8883:8883"
     volumes:
       - /etc/mosquitto/conf.d/default.conf:/mosquitto/config/mosquitto.conf:ro
-      - /etc/mosquitto/passwd:/etc/mosquitto/passwd:ro
+      # rw: cihaz-basina MQTT kaydi (ops/mosquitto_kayit_uygula.sh) bu dosyayi
+      # mosquitto_passwd araciyla, konteyner icinden guncelliyor. ro iken
+      # "Read-only file system" hatasiyla basarisiz oluyordu.
+      - /etc/mosquitto/passwd:/etc/mosquitto/passwd
       # TLS sertifikalari. Bu baglama olmadan mosquitto sertifikayi bulamaz,
       # acilista hata verip CIKAR ve broker cokme dongusune girer -- yani
       # eksikligi sessiz degil, tam kesinti demek.
