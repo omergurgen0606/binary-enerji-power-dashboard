@@ -917,7 +917,7 @@ function AccountPage({ token, onBack, onLogout, deviceCount, theme, onThemeChang
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
-              <SubscriptionCard subscription={subscription} />
+              <SubscriptionCard subscription={subscription} token={token} />
             </div>
 
             <div style={{ borderTop: '1px solid var(--border)', marginTop: 20, paddingTop: 20 }}>
@@ -1191,7 +1191,7 @@ function SubscriptionBanner({ subscription }) {
   );
 }
 
-function SubscriptionCard({ subscription }) {
+function SubscriptionCard({ subscription, token }) {
   if (!subscription) return null;
   const { status, active, valid_until: validUntil, device_count: deviceCount,
           device_limit: deviceLimit, device_price: devicePrice, period } = subscription;
@@ -1218,11 +1218,159 @@ function SubscriptionCard({ subscription }) {
       </div>
       <div style={{ fontSize: 11, color: 'var(--muted)', marginTop: 10, lineHeight: 1.5 }}>
         Abonelik sona erse bile cihazlarınız veri göndermeye devam eder ve geçmişiniz silinmez;
-        yalnızca panel erişimi kapanır. Yenileme için bizimle iletişime geçin.
+        yalnızca panel erişimi kapanır.
       </div>
       <div style={{ fontSize: 11, color: renk, marginTop: 6, fontWeight: 600 }}>
         {active ? 'Erişiminiz açık.' : 'Panel erişimi kapalı.'}
       </div>
+      {token && <PaymentSection token={token} />}
+    </div>
+  );
+}
+
+const BILLING_FIELDS = [
+  { key: 'contact_name', label: 'Ad Soyad / Yetkili', placeholder: 'Ömer Gürgen' },
+  { key: 'identity_number', label: 'TC Kimlik No / Vergi No', placeholder: '10-11 haneli' },
+  { key: 'email', label: 'E-posta', placeholder: 'fatura@sirket.com' },
+  { key: 'phone', label: 'Telefon', placeholder: '5xx xxx xx xx' },
+  { key: 'address', label: 'Adres', placeholder: 'Fatura adresi' },
+  { key: 'city', label: 'Şehir', placeholder: 'İstanbul' },
+];
+
+// Iyzico'nun "buyer" nesnesi kimlik no, adres, telefon istiyor -- bunlar
+// organizations tablosunda hiç yoktu. Bir kez girilip saklanıyor, her
+// ödemede yeniden sorulmuyor.
+function BillingProfileForm({ token, onSaved }) {
+  const [form, setForm] = useState({ contact_name: '', identity_number: '', email: '',
+                                     phone: '', address: '', city: '', country: 'Turkey' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    axios.get(`${API_BASE}/subscription/billing`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setForm((f) => ({ ...f, ...res.data })))
+      .catch(() => {}); // 404: henuz girilmemis, bos formla basliyoruz
+  }, [token]);
+
+  async function kaydet() {
+    setSaving(true);
+    setError(null);
+    try {
+      await axios.put(`${API_BASE}/subscription/billing`, form, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      onSaved();
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Kaydedilemedi');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div style={{
+      background: 'var(--bg)', borderRadius: 'var(--radius-xs)', padding: 12,
+      display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8,
+    }}>
+      <span style={{ fontSize: 12, fontWeight: 600 }}>Fatura Bilgileri</span>
+      <span style={{ fontSize: 11, color: 'var(--muted)' }}>
+        Ödeme sağlayıcımız Iyzico, ödemeyi işleyebilmek için bu bilgileri istiyor. Bir kez girip
+        saklıyoruz, bir daha sorulmuyor.
+      </span>
+      {BILLING_FIELDS.map((f) => (
+        <input
+          key={f.key}
+          type="text"
+          value={form[f.key] || ''}
+          placeholder={f.placeholder}
+          onChange={(e) => setForm((s) => ({ ...s, [f.key]: e.target.value }))}
+          style={{ ...inputStyle, fontSize: 13, padding: '7px 10px' }}
+        />
+      ))}
+      {error && <span style={{ fontSize: 11, color: 'var(--danger)' }}>{error}</span>}
+      <button
+        type="button"
+        onClick={kaydet}
+        disabled={saving}
+        style={{
+          padding: '8px 12px', borderRadius: 'var(--radius-xs)', border: 'none',
+          background: 'var(--l3)', color: '#fff', fontSize: 12, fontWeight: 700,
+          cursor: saving ? 'default' : 'pointer', opacity: saving ? 0.6 : 1,
+        }}
+      >
+        {saving ? 'Kaydediliyor…' : 'Kaydet'}
+      </button>
+    </div>
+  );
+}
+
+// Fatura bilgisi eksikse önce onu istiyor, varsa doğrudan tutarı gösterip
+// Iyzico'nun ödeme sayfasına yönlendiriyor. Kart bilgisi hiçbir zaman bu
+// sayfaya (ya da backend'imize) dokunmuyor -- Iyzico'nun kendi barındırdığı
+// formunda kalıyor.
+function PaymentSection({ token }) {
+  const [price, setPrice] = useState(null);
+  const [billingMissing, setBillingMissing] = useState(false);
+  const [showBillingForm, setShowBillingForm] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [error, setError] = useState(null);
+
+  function fiyatiYukle() {
+    axios.get(`${API_BASE}/subscription/price`, { headers: { Authorization: `Bearer ${token}` } })
+      .then((res) => setPrice(res.data))
+      .catch(() => setPrice(null));
+    axios.get(`${API_BASE}/subscription/billing`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(() => setBillingMissing(false))
+      .catch(() => setBillingMissing(true));
+  }
+
+  useEffect(fiyatiYukle, [token]);
+
+  async function ode() {
+    if (billingMissing) {
+      setShowBillingForm(true);
+      return;
+    }
+    setPaying(true);
+    setError(null);
+    try {
+      const res = await axios.post(`${API_BASE}/subscription/checkout`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      window.location.href = res.data.paymentPageUrl;
+    } catch (err) {
+      setError(err.response?.data?.detail || 'Ödeme başlatılamadı');
+      setPaying(false);
+    }
+  }
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border)', marginTop: 12, paddingTop: 12 }}>
+      {price && (
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 8 }}>
+          Ödenecek tutar: <strong style={{ color: 'var(--ink)' }}>{money(price.price)}</strong>
+          {' '}({price.device_count} cihaz × {money(price.device_price)} × {price.months} ay)
+        </div>
+      )}
+      {error && <div style={{ fontSize: 11, color: 'var(--danger)', marginBottom: 8 }}>{error}</div>}
+      <button
+        type="button"
+        onClick={ode}
+        disabled={paying}
+        style={{
+          padding: '9px 16px', borderRadius: 'var(--radius-xs)', border: 'none',
+          background: 'var(--l2)', color: '#fff', fontSize: 13, fontWeight: 700,
+          cursor: paying ? 'default' : 'pointer', opacity: paying ? 0.6 : 1,
+        }}
+      >
+        {paying ? 'Yönlendiriliyor…' : 'Şimdi Öde'}
+      </button>
+      <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 6 }}>
+        Ödeme Iyzico'nun güvenli sayfasında yapılır, kart bilgileriniz bize hiç ulaşmaz.
+      </div>
+      {showBillingForm && (
+        <BillingProfileForm token={token} onSaved={() => { setShowBillingForm(false); fiyatiYukle(); }} />
+      )}
     </div>
   );
 }
@@ -5192,6 +5340,46 @@ function Footer() {
   );
 }
 
+// Iyzico odeme sonrasi tarayiciyi buraya yonlendiriyor (bkz. api.py,
+// subscription_payment_callback). Durum backend'in KENDI dogruladigi sonuca
+// gore ?durum= parametresiyle geliyor -- bu sayfa hicbir sey dogrulamiyor,
+// sadece o kararı gösteriyor.
+const PAYMENT_RESULT_COPY = {
+  basarili: { baslik: 'Ödeme alındı', renk: 'var(--accent)',
+             metin: 'Aboneliğiniz uzatıldı. Panele dönebilirsiniz.' },
+  basarisiz: { baslik: 'Ödeme başarısız', renk: 'var(--danger)',
+              metin: 'Kartınızdan tahsilat yapılamadı. Farklı bir kartla tekrar deneyebilirsiniz.' },
+  hata: { baslik: 'Bir sorun oluştu', renk: 'var(--danger)',
+         metin: 'Ödeme durumunu doğrulayamadık. Kartınızdan çekim yapıldıysa birkaç dakika içinde abonelik durumunuz güncellenecektir; devam ederse bizimle iletişime geçin.' },
+};
+
+function PaymentResultPage() {
+  const durum = new URLSearchParams(window.location.search).get('durum');
+  const bilgi = PAYMENT_RESULT_COPY[durum] || PAYMENT_RESULT_COPY.hata;
+
+  return (
+    <div className="centered-page" style={{ maxWidth: 420, padding: '0 24px' }}>
+      <div style={{
+        background: 'var(--surface)', border: '1px solid var(--border)',
+        borderRadius: "var(--radius-md)", padding: 32, textAlign: 'center',
+      }}>
+        <div style={{ fontSize: 18, fontWeight: 700, color: bilgi.renk, marginBottom: 10 }}>
+          {bilgi.baslik}
+        </div>
+        <div style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 20 }}>
+          {bilgi.metin}
+        </div>
+        <a href="/hesabim" style={{
+          display: 'inline-block', padding: '9px 18px', borderRadius: "var(--radius-xs)",
+          background: 'var(--l3)', color: '#fff', fontSize: 13, fontWeight: 600, textDecoration: 'none',
+        }}>
+          Panele Dön
+        </a>
+      </div>
+    </div>
+  );
+}
+
 function PrivacyPolicy() {
   return (
     <div className="centered-page" style={{ maxWidth: 640, padding: '0 24px' }}>
@@ -5289,6 +5477,7 @@ function TermsOfService() {
 // kendiliğinden çalışıyor, sayfa yenilenince bulunduğunuz yer korunuyor ve
 // bir cihazın bağlantısı paylaşılabiliyor.
 function parseRoute(pathname) {
+  if (pathname === '/odeme') return { ad: 'odeme' };
   if (pathname === '/gizlilik-politikasi') return { ad: 'gizlilik' };
   if (pathname === '/kullanim-sartlari') return { ad: 'sartlar' };
   if (pathname.startsWith('/davet')) return { ad: 'davet' };
@@ -5394,6 +5583,7 @@ export default function App() {
     }
   }, [route.ad, route.deviceId, devices, selectedDevice]);
 
+  if (route.ad === 'odeme') return <PaymentResultPage />;
   if (route.ad === 'gizlilik') return <PrivacyPolicy />;
   if (route.ad === 'sartlar') return <TermsOfService />;
   if (route.ad === 'davet') return <InvitePage token={localStorage.getItem('token')} />;
