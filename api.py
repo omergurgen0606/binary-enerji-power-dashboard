@@ -619,6 +619,7 @@ CIHAZ_VERI_TABLOLARI = (
     "device_info",
     "device_settings",
     "device_tariff",
+    "device_mqtt_credentials",
     "alarm_events",
     "alarm_rules",
 )
@@ -3112,6 +3113,54 @@ def send_device_command(device_id: str, payload: DeviceCommandRequest, user: str
         print("Komut gonderme hatasi:", e)
         raise HTTPException(status_code=502, detail="Komut cihaza gönderilemedi")
     return {"message": "Komut gönderildi"}
+
+# ---------------------------------------------------------------------------
+# Cihaz-başına MQTT kaydı
+#
+# Broker'da tek bir paylaşılan kimlik bilgisi var, allow_anonymous false +
+# password_file dışında hiçbir topic izolasyonu yok -- bu kimlik bilgisini
+# elinde tutan biri her cihazın topic'ine yazabiliyordu (sahte ölçüm,
+# yetkisiz /cmd komutu). Çözüm her cihazın KENDİ ürettiği (esp_random ile,
+# firmware imajında ortak OLMAYAN) bir kimlik kullanması.
+#
+# Bu uç nokta o kimliği yalnızca KAYDEDİYOR -- mosquitto'nun parola dosyasına
+# doğrudan yazmıyor. api container'ının o dosyaya erişimi yok, ve hash
+# formatını kendim taklit edip yazmak bir hatada PAYLAŞILAN kimlik bilgisini
+# de bozup tüm cihazların bağlantısını kesebilirdi. Gerçek yazma işlemi
+# host'ta ops/mosquitto_kayit_uygula.sh ile, mosquitto_passwd aracının
+# kendisiyle yapılıyor (applied=false satırları periyodik işler).
+class MqttEnrollRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/devices/{device_id}/mqtt-enroll")
+def enroll_device_mqtt(device_id: str, payload: MqttEnrollRequest, user: str = Depends(require_auth)):
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if payload.username != device_id:
+        raise HTTPException(status_code=400, detail="Kullanıcı adı cihaz kimliğiyle eşleşmeli")
+    if not re.match(r"^[a-fA-F0-9]{32,128}$", payload.password):
+        raise HTTPException(status_code=400, detail="Geçersiz parola biçimi")
+    check_rate_limit(f"mqttenroll:{device_id}", max_attempts=5, window_seconds=60 * 60)
+
+    conn = db_connect()
+    conn.autocommit = True
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO device_mqtt_credentials (device_id, mqtt_username, mqtt_password)
+        VALUES (%s, %s, %s)
+        ON CONFLICT (device_id) DO UPDATE SET
+            mqtt_username = EXCLUDED.mqtt_username,
+            mqtt_password = EXCLUDED.mqtt_password,
+            applied = false, applied_at = NULL, created_at = now()
+    """, (device_id, payload.username, payload.password))
+    cur.close()
+    conn.close()
+
+    # Parola denetim kaydına ASLA yazılmıyor -- audit() çağrısına hiç verilmiyor.
+    audit("device.mqtt_enroll", actor=user, entity_type="device", entity_id=device_id)
+    return {"message": "MQTT kaydı alındı, birkaç dakika içinde uygulanacak."}
+
 
 # Register 221 = "Akım Trafo Oranı (Table Index)" (Parametreler sayfası, W/R, 0-69).
 # ONEMLI: eskiden 214 kullaniliyordu, bu register aslinda "Okuma Koruma Biti" (0/1,
