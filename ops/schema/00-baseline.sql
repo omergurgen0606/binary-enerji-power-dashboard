@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict JP3bEwbYm6ddAfSRXGpyypebSgrL7s1p7X2TxF9NPvFyfjqdDhvn5tK5JsRfNwn
+\restrict luDTRxDEEw9aUfD4FRiB0W45CANnCwY2hsWV5qCqs5GsHwNW29NvxKBP7YBHd6z
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -26,7 +26,7 @@ CREATE EXTENSION IF NOT EXISTS timescaledb WITH SCHEMA public;
 
 
 --
--- Name: EXTENSION timescaledb; Type: COMMENT; Schema: -; Owner: -
+-- Name: EXTENSION timescaledb; Type: COMMENT; Schema: -; Owner: 
 --
 
 COMMENT ON EXTENSION timescaledb IS 'Enables scalable inserts and complex queries for time-series data (Community Edition)';
@@ -37,7 +37,7 @@ SET default_tablespace = '';
 SET default_table_access_method = heap;
 
 --
--- Name: device_energy; Type: TABLE; Schema: public; Owner: -
+-- Name: device_energy; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_energy (
@@ -52,8 +52,10 @@ CREATE TABLE public.device_energy (
 );
 
 
+ALTER TABLE public.device_energy OWNER TO postgres;
+
 --
--- Name: _direct_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+-- Name: _direct_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE VIEW _timescaledb_internal._direct_view_10 AS
@@ -82,8 +84,10 @@ CREATE VIEW _timescaledb_internal._direct_view_10 AS
   GROUP BY device_id, (public.time_bucket('01:00:00'::interval, "time"));
 
 
+ALTER VIEW _timescaledb_internal._direct_view_10 OWNER TO postgres;
+
 --
--- Name: measurements; Type: TABLE; Schema: public; Owner: -
+-- Name: measurements; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.measurements (
@@ -127,8 +131,10 @@ CREATE TABLE public.measurements (
 );
 
 
+ALTER TABLE public.measurements OWNER TO postgres;
+
 --
--- Name: _direct_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+-- Name: _direct_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE VIEW _timescaledb_internal._direct_view_11 AS
@@ -157,8 +163,10 @@ CREATE VIEW _timescaledb_internal._direct_view_11 AS
   GROUP BY device_id, (public.time_bucket('00:10:00'::interval, "time"));
 
 
+ALTER VIEW _timescaledb_internal._direct_view_11 OWNER TO postgres;
+
 --
--- Name: _direct_view_9; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+-- Name: _direct_view_9; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE VIEW _timescaledb_internal._direct_view_9 AS
@@ -208,8 +216,10 @@ CREATE VIEW _timescaledb_internal._direct_view_9 AS
   GROUP BY device_id, (public.time_bucket('00:15:00'::interval, "time"));
 
 
+ALTER VIEW _timescaledb_internal._direct_view_9 OWNER TO postgres;
+
 --
--- Name: _materialized_hypertable_10; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_10; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._materialized_hypertable_10 (
@@ -237,8 +247,10 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_10 (
 );
 
 
+ALTER TABLE _timescaledb_internal._materialized_hypertable_10 OWNER TO postgres;
+
 --
--- Name: _hyper_10_14_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_10_14_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_10_14_chunk (
@@ -247,8 +259,10 @@ CREATE TABLE _timescaledb_internal._hyper_10_14_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_10);
 
 
+ALTER TABLE _timescaledb_internal._hyper_10_14_chunk OWNER TO postgres;
+
 --
--- Name: _materialized_hypertable_11; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_11; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._materialized_hypertable_11 (
@@ -276,8 +290,10 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_11 (
 );
 
 
+ALTER TABLE _timescaledb_internal._materialized_hypertable_11 OWNER TO postgres;
+
 --
--- Name: _hyper_11_21_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_21_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_11_21_chunk (
@@ -286,8 +302,10 @@ CREATE TABLE _timescaledb_internal._hyper_11_21_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_11);
 
 
+ALTER TABLE _timescaledb_internal._hyper_11_21_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_11_22_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_22_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_11_22_chunk (
@@ -296,8 +314,10 @@ CREATE TABLE _timescaledb_internal._hyper_11_22_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_11);
 
 
+ALTER TABLE _timescaledb_internal._hyper_11_22_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_11_23_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_23_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_11_23_chunk (
@@ -306,8 +326,10 @@ CREATE TABLE _timescaledb_internal._hyper_11_23_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_11);
 
 
+ALTER TABLE _timescaledb_internal._hyper_11_23_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_11_34_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_34_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_11_34_chunk (
@@ -316,8 +338,10 @@ CREATE TABLE _timescaledb_internal._hyper_11_34_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_11);
 
 
+ALTER TABLE _timescaledb_internal._hyper_11_34_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_15_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_15_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_15_chunk (
@@ -326,8 +350,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_15_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_15_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_1_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_1_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_1_chunk (
@@ -336,8 +362,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_1_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_1_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_1_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_1_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_1_chunk_compressed (
@@ -429,8 +457,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk_compressed ALTER COLUMN thvd3 SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_1_chunk_compressed OWNER TO postgres;
+
 --
--- Name: _hyper_1_24_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_24_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_24_chunk (
@@ -439,8 +469,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_24_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_24_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_25_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_25_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_25_chunk (
@@ -449,8 +481,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_25_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_25_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_26_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_26_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_26_chunk (
@@ -459,8 +493,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_26_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_26_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_27_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_27_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_27_chunk (
@@ -469,8 +505,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_27_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_27_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_2_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_2_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_2_chunk (
@@ -479,8 +517,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_2_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_2_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_2_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_2_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_2_chunk_compressed (
@@ -572,8 +612,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk_compressed ALTER COLUMN thvd3 SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_2_chunk_compressed OWNER TO postgres;
+
 --
--- Name: _hyper_1_33_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_33_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_33_chunk (
@@ -582,8 +624,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_33_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_33_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_5_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_5_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_5_chunk (
@@ -592,8 +636,10 @@ CREATE TABLE _timescaledb_internal._hyper_1_5_chunk (
 INHERITS (public.measurements);
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_5_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_1_5_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_5_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_1_5_chunk_compressed (
@@ -685,8 +731,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_1_5_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_5_chunk_compressed ALTER COLUMN thvd3 SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_1_5_chunk_compressed OWNER TO postgres;
+
 --
--- Name: _hyper_3_16_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_16_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_3_16_chunk (
@@ -695,8 +743,10 @@ CREATE TABLE _timescaledb_internal._hyper_3_16_chunk (
 INHERITS (public.device_energy);
 
 
+ALTER TABLE _timescaledb_internal._hyper_3_16_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_3_28_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_28_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_3_28_chunk (
@@ -705,8 +755,10 @@ CREATE TABLE _timescaledb_internal._hyper_3_28_chunk (
 INHERITS (public.device_energy);
 
 
+ALTER TABLE _timescaledb_internal._hyper_3_28_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_3_3_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_3_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_3_3_chunk (
@@ -715,8 +767,10 @@ CREATE TABLE _timescaledb_internal._hyper_3_3_chunk (
 INHERITS (public.device_energy);
 
 
+ALTER TABLE _timescaledb_internal._hyper_3_3_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_3_3_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_3_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_3_3_chunk_compressed (
@@ -750,8 +804,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk_compressed ALTER COLUMN capacitive_varh_uretim SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_3_3_chunk_compressed OWNER TO postgres;
+
 --
--- Name: _hyper_3_4_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_4_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_3_4_chunk (
@@ -760,8 +816,10 @@ CREATE TABLE _timescaledb_internal._hyper_3_4_chunk (
 INHERITS (public.device_energy);
 
 
+ALTER TABLE _timescaledb_internal._hyper_3_4_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_3_4_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_4_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_3_4_chunk_compressed (
@@ -795,8 +853,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_3_4_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_3_4_chunk_compressed ALTER COLUMN capacitive_varh_uretim SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_3_4_chunk_compressed OWNER TO postgres;
+
 --
--- Name: device_stats; Type: TABLE; Schema: public; Owner: -
+-- Name: device_stats; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_stats (
@@ -830,8 +890,10 @@ CREATE TABLE public.device_stats (
 );
 
 
+ALTER TABLE public.device_stats OWNER TO postgres;
+
 --
--- Name: _hyper_4_17_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_17_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_4_17_chunk (
@@ -840,8 +902,10 @@ CREATE TABLE _timescaledb_internal._hyper_4_17_chunk (
 INHERITS (public.device_stats);
 
 
+ALTER TABLE _timescaledb_internal._hyper_4_17_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_4_29_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_29_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_4_29_chunk (
@@ -850,8 +914,10 @@ CREATE TABLE _timescaledb_internal._hyper_4_29_chunk (
 INHERITS (public.device_stats);
 
 
+ALTER TABLE _timescaledb_internal._hyper_4_29_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_4_6_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_6_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_4_6_chunk (
@@ -860,8 +926,10 @@ CREATE TABLE _timescaledb_internal._hyper_4_6_chunk (
 INHERITS (public.device_stats);
 
 
+ALTER TABLE _timescaledb_internal._hyper_4_6_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_4_6_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_6_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_4_6_chunk_compressed (
@@ -933,8 +1001,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_4_6_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_4_6_chunk_compressed ALTER COLUMN avg_thvd SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_4_6_chunk_compressed OWNER TO postgres;
+
 --
--- Name: device_peaks; Type: TABLE; Schema: public; Owner: -
+-- Name: device_peaks; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_peaks (
@@ -1002,8 +1072,10 @@ CREATE TABLE public.device_peaks (
 );
 
 
+ALTER TABLE public.device_peaks OWNER TO postgres;
+
 --
--- Name: _hyper_5_18_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_18_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_5_18_chunk (
@@ -1012,8 +1084,10 @@ CREATE TABLE _timescaledb_internal._hyper_5_18_chunk (
 INHERITS (public.device_peaks);
 
 
+ALTER TABLE _timescaledb_internal._hyper_5_18_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_5_30_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_30_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_5_30_chunk (
@@ -1022,8 +1096,10 @@ CREATE TABLE _timescaledb_internal._hyper_5_30_chunk (
 INHERITS (public.device_peaks);
 
 
+ALTER TABLE _timescaledb_internal._hyper_5_30_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_5_7_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_7_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_5_7_chunk (
@@ -1032,8 +1108,10 @@ CREATE TABLE _timescaledb_internal._hyper_5_7_chunk (
 INHERITS (public.device_peaks);
 
 
+ALTER TABLE _timescaledb_internal._hyper_5_7_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_5_7_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_7_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_5_7_chunk_compressed (
@@ -1173,8 +1251,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_5_7_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_5_7_chunk_compressed ALTER COLUMN max_i_unbal SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_5_7_chunk_compressed OWNER TO postgres;
+
 --
--- Name: device_demand; Type: TABLE; Schema: public; Owner: -
+-- Name: device_demand; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_demand (
@@ -1226,8 +1306,10 @@ CREATE TABLE public.device_demand (
 );
 
 
+ALTER TABLE public.device_demand OWNER TO postgres;
+
 --
--- Name: _hyper_6_19_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_19_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_6_19_chunk (
@@ -1236,8 +1318,10 @@ CREATE TABLE _timescaledb_internal._hyper_6_19_chunk (
 INHERITS (public.device_demand);
 
 
+ALTER TABLE _timescaledb_internal._hyper_6_19_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_6_31_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_31_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_6_31_chunk (
@@ -1246,8 +1330,10 @@ CREATE TABLE _timescaledb_internal._hyper_6_31_chunk (
 INHERITS (public.device_demand);
 
 
+ALTER TABLE _timescaledb_internal._hyper_6_31_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_6_8_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_8_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_6_8_chunk (
@@ -1256,8 +1342,10 @@ CREATE TABLE _timescaledb_internal._hyper_6_8_chunk (
 INHERITS (public.device_demand);
 
 
+ALTER TABLE _timescaledb_internal._hyper_6_8_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_6_8_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_8_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_6_8_chunk_compressed (
@@ -1366,8 +1454,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_6_8_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_6_8_chunk_compressed ALTER COLUMN min_dthid3 SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_6_8_chunk_compressed OWNER TO postgres;
+
 --
--- Name: device_harmonics; Type: TABLE; Schema: public; Owner: -
+-- Name: device_harmonics; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_harmonics (
@@ -1425,8 +1515,10 @@ CREATE TABLE public.device_harmonics (
 );
 
 
+ALTER TABLE public.device_harmonics OWNER TO postgres;
+
 --
--- Name: _hyper_7_20_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_20_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_7_20_chunk (
@@ -1435,8 +1527,10 @@ CREATE TABLE _timescaledb_internal._hyper_7_20_chunk (
 INHERITS (public.device_harmonics);
 
 
+ALTER TABLE _timescaledb_internal._hyper_7_20_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_7_32_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_32_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_7_32_chunk (
@@ -1445,8 +1539,10 @@ CREATE TABLE _timescaledb_internal._hyper_7_32_chunk (
 INHERITS (public.device_harmonics);
 
 
+ALTER TABLE _timescaledb_internal._hyper_7_32_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_7_9_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_9_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_7_9_chunk (
@@ -1455,8 +1551,10 @@ CREATE TABLE _timescaledb_internal._hyper_7_9_chunk (
 INHERITS (public.device_harmonics);
 
 
+ALTER TABLE _timescaledb_internal._hyper_7_9_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_7_9_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_9_chunk_compressed; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_7_9_chunk_compressed (
@@ -1577,8 +1675,10 @@ ALTER TABLE ONLY _timescaledb_internal._hyper_7_9_chunk_compressed ALTER COLUMN 
 ALTER TABLE ONLY _timescaledb_internal._hyper_7_9_chunk_compressed ALTER COLUMN h31_l3 SET STATISTICS 0;
 
 
+ALTER TABLE _timescaledb_internal._hyper_7_9_chunk_compressed OWNER TO postgres;
+
 --
--- Name: _materialized_hypertable_9; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_9; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._materialized_hypertable_9 (
@@ -1627,8 +1727,10 @@ CREATE TABLE _timescaledb_internal._materialized_hypertable_9 (
 );
 
 
+ALTER TABLE _timescaledb_internal._materialized_hypertable_9 OWNER TO postgres;
+
 --
--- Name: _hyper_9_11_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_11_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_9_11_chunk (
@@ -1637,8 +1739,10 @@ CREATE TABLE _timescaledb_internal._hyper_9_11_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_9);
 
 
+ALTER TABLE _timescaledb_internal._hyper_9_11_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_9_12_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_12_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_9_12_chunk (
@@ -1647,8 +1751,10 @@ CREATE TABLE _timescaledb_internal._hyper_9_12_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_9);
 
 
+ALTER TABLE _timescaledb_internal._hyper_9_12_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_9_13_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_13_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_9_13_chunk (
@@ -1657,8 +1763,10 @@ CREATE TABLE _timescaledb_internal._hyper_9_13_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_9);
 
 
+ALTER TABLE _timescaledb_internal._hyper_9_13_chunk OWNER TO postgres;
+
 --
--- Name: _hyper_9_35_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_35_chunk; Type: TABLE; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE TABLE _timescaledb_internal._hyper_9_35_chunk (
@@ -1667,8 +1775,10 @@ CREATE TABLE _timescaledb_internal._hyper_9_35_chunk (
 INHERITS (_timescaledb_internal._materialized_hypertable_9);
 
 
+ALTER TABLE _timescaledb_internal._hyper_9_35_chunk OWNER TO postgres;
+
 --
--- Name: _partial_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+-- Name: _partial_view_10; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE VIEW _timescaledb_internal._partial_view_10 AS
@@ -1697,8 +1807,10 @@ CREATE VIEW _timescaledb_internal._partial_view_10 AS
   GROUP BY device_id, (public.time_bucket('01:00:00'::interval, "time"));
 
 
+ALTER VIEW _timescaledb_internal._partial_view_10 OWNER TO postgres;
+
 --
--- Name: _partial_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+-- Name: _partial_view_11; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE VIEW _timescaledb_internal._partial_view_11 AS
@@ -1727,8 +1839,10 @@ CREATE VIEW _timescaledb_internal._partial_view_11 AS
   GROUP BY device_id, (public.time_bucket('00:10:00'::interval, "time"));
 
 
+ALTER VIEW _timescaledb_internal._partial_view_11 OWNER TO postgres;
+
 --
--- Name: _partial_view_9; Type: VIEW; Schema: _timescaledb_internal; Owner: -
+-- Name: _partial_view_9; Type: VIEW; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE VIEW _timescaledb_internal._partial_view_9 AS
@@ -1778,8 +1892,10 @@ CREATE VIEW _timescaledb_internal._partial_view_9 AS
   GROUP BY device_id, (public.time_bucket('00:15:00'::interval, "time"));
 
 
+ALTER VIEW _timescaledb_internal._partial_view_9 OWNER TO postgres;
+
 --
--- Name: alarm_events; Type: TABLE; Schema: public; Owner: -
+-- Name: alarm_events; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.alarm_events (
@@ -1793,8 +1909,10 @@ CREATE TABLE public.alarm_events (
 );
 
 
+ALTER TABLE public.alarm_events OWNER TO postgres;
+
 --
--- Name: alarm_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: alarm_events_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.alarm_events_id_seq
@@ -1806,15 +1924,17 @@ CREATE SEQUENCE public.alarm_events_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.alarm_events_id_seq OWNER TO postgres;
+
 --
--- Name: alarm_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: alarm_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.alarm_events_id_seq OWNED BY public.alarm_events.id;
 
 
 --
--- Name: alarm_rules; Type: TABLE; Schema: public; Owner: -
+-- Name: alarm_rules; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.alarm_rules (
@@ -1833,8 +1953,10 @@ CREATE TABLE public.alarm_rules (
 );
 
 
+ALTER TABLE public.alarm_rules OWNER TO postgres;
+
 --
--- Name: alarm_rules_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: alarm_rules_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.alarm_rules_id_seq
@@ -1846,15 +1968,17 @@ CREATE SEQUENCE public.alarm_rules_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.alarm_rules_id_seq OWNER TO postgres;
+
 --
--- Name: alarm_rules_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: alarm_rules_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.alarm_rules_id_seq OWNED BY public.alarm_rules.id;
 
 
 --
--- Name: audit_log; Type: TABLE; Schema: public; Owner: -
+-- Name: audit_log; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.audit_log (
@@ -1870,8 +1994,10 @@ CREATE TABLE public.audit_log (
 );
 
 
+ALTER TABLE public.audit_log OWNER TO postgres;
+
 --
--- Name: audit_log_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: audit_log_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.audit_log_id_seq
@@ -1882,15 +2008,17 @@ CREATE SEQUENCE public.audit_log_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.audit_log_id_seq OWNER TO postgres;
+
 --
--- Name: audit_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: audit_log_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.audit_log_id_seq OWNED BY public.audit_log.id;
 
 
 --
--- Name: deletion_requests; Type: TABLE; Schema: public; Owner: -
+-- Name: deletion_requests; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.deletion_requests (
@@ -1901,8 +2029,10 @@ CREATE TABLE public.deletion_requests (
 );
 
 
+ALTER TABLE public.deletion_requests OWNER TO postgres;
+
 --
--- Name: deletion_requests_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: deletion_requests_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.deletion_requests_id_seq
@@ -1913,15 +2043,17 @@ CREATE SEQUENCE public.deletion_requests_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.deletion_requests_id_seq OWNER TO postgres;
+
 --
--- Name: deletion_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: deletion_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.deletion_requests_id_seq OWNED BY public.deletion_requests.id;
 
 
 --
--- Name: departments; Type: TABLE; Schema: public; Owner: -
+-- Name: departments; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.departments (
@@ -1932,8 +2064,10 @@ CREATE TABLE public.departments (
 );
 
 
+ALTER TABLE public.departments OWNER TO postgres;
+
 --
--- Name: departments_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: departments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.departments_id_seq
@@ -1945,15 +2079,17 @@ CREATE SEQUENCE public.departments_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.departments_id_seq OWNER TO postgres;
+
 --
--- Name: departments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: departments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.departments_id_seq OWNED BY public.departments.id;
 
 
 --
--- Name: device_energy_hourly; Type: VIEW; Schema: public; Owner: -
+-- Name: device_energy_hourly; Type: VIEW; Schema: public; Owner: postgres
 --
 
 CREATE VIEW public.device_energy_hourly AS
@@ -2007,8 +2143,10 @@ UNION ALL
   GROUP BY device_energy.device_id, (public.time_bucket('01:00:00'::interval, device_energy."time"));
 
 
+ALTER VIEW public.device_energy_hourly OWNER TO postgres;
+
 --
--- Name: device_info; Type: TABLE; Schema: public; Owner: -
+-- Name: device_info; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_info (
@@ -2030,8 +2168,10 @@ CREATE TABLE public.device_info (
 );
 
 
+ALTER TABLE public.device_info OWNER TO postgres;
+
 --
--- Name: device_mqtt_credentials; Type: TABLE; Schema: public; Owner: -
+-- Name: device_mqtt_credentials; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_mqtt_credentials (
@@ -2044,8 +2184,10 @@ CREATE TABLE public.device_mqtt_credentials (
 );
 
 
+ALTER TABLE public.device_mqtt_credentials OWNER TO postgres;
+
 --
--- Name: device_settings; Type: TABLE; Schema: public; Owner: -
+-- Name: device_settings; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_settings (
@@ -2057,8 +2199,10 @@ CREATE TABLE public.device_settings (
 );
 
 
+ALTER TABLE public.device_settings OWNER TO postgres;
+
 --
--- Name: device_tariff; Type: TABLE; Schema: public; Owner: -
+-- Name: device_tariff; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.device_tariff (
@@ -2083,8 +2227,10 @@ CREATE TABLE public.device_tariff (
 );
 
 
+ALTER TABLE public.device_tariff OWNER TO postgres;
+
 --
--- Name: devices; Type: TABLE; Schema: public; Owner: -
+-- Name: devices; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.devices (
@@ -2098,8 +2244,10 @@ CREATE TABLE public.devices (
 );
 
 
+ALTER TABLE public.devices OWNER TO postgres;
+
 --
--- Name: devices_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: devices_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.devices_id_seq
@@ -2111,15 +2259,17 @@ CREATE SEQUENCE public.devices_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.devices_id_seq OWNER TO postgres;
+
 --
--- Name: devices_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: devices_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.devices_id_seq OWNED BY public.devices.id;
 
 
 --
--- Name: facilities; Type: TABLE; Schema: public; Owner: -
+-- Name: facilities; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.facilities (
@@ -2130,8 +2280,10 @@ CREATE TABLE public.facilities (
 );
 
 
+ALTER TABLE public.facilities OWNER TO postgres;
+
 --
--- Name: facilities_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: facilities_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.facilities_id_seq
@@ -2143,15 +2295,17 @@ CREATE SEQUENCE public.facilities_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.facilities_id_seq OWNER TO postgres;
+
 --
--- Name: facilities_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: facilities_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.facilities_id_seq OWNED BY public.facilities.id;
 
 
 --
--- Name: firmware_builds; Type: TABLE; Schema: public; Owner: -
+-- Name: firmware_builds; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.firmware_builds (
@@ -2165,8 +2319,10 @@ CREATE TABLE public.firmware_builds (
 );
 
 
+ALTER TABLE public.firmware_builds OWNER TO postgres;
+
 --
--- Name: firmware_builds_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: firmware_builds_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.firmware_builds_id_seq
@@ -2178,15 +2334,17 @@ CREATE SEQUENCE public.firmware_builds_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.firmware_builds_id_seq OWNER TO postgres;
+
 --
--- Name: firmware_builds_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: firmware_builds_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.firmware_builds_id_seq OWNED BY public.firmware_builds.id;
 
 
 --
--- Name: iyzico_payments; Type: TABLE; Schema: public; Owner: -
+-- Name: iyzico_payments; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.iyzico_payments (
@@ -2206,8 +2364,10 @@ CREATE TABLE public.iyzico_payments (
 );
 
 
+ALTER TABLE public.iyzico_payments OWNER TO postgres;
+
 --
--- Name: iyzico_payments_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: iyzico_payments_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.iyzico_payments_id_seq
@@ -2219,15 +2379,17 @@ CREATE SEQUENCE public.iyzico_payments_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.iyzico_payments_id_seq OWNER TO postgres;
+
 --
--- Name: iyzico_payments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: iyzico_payments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.iyzico_payments_id_seq OWNED BY public.iyzico_payments.id;
 
 
 --
--- Name: measurements_10min; Type: VIEW; Schema: public; Owner: -
+-- Name: measurements_10min; Type: VIEW; Schema: public; Owner: postgres
 --
 
 CREATE VIEW public.measurements_10min AS
@@ -2281,8 +2443,10 @@ UNION ALL
   GROUP BY measurements.device_id, (public.time_bucket('00:10:00'::interval, measurements."time"));
 
 
+ALTER VIEW public.measurements_10min OWNER TO postgres;
+
 --
--- Name: measurements_15min; Type: VIEW; Schema: public; Owner: -
+-- Name: measurements_15min; Type: VIEW; Schema: public; Owner: postgres
 --
 
 CREATE VIEW public.measurements_15min AS
@@ -2378,8 +2542,10 @@ UNION ALL
   GROUP BY measurements.device_id, (public.time_bucket('00:15:00'::interval, measurements."time"));
 
 
+ALTER VIEW public.measurements_15min OWNER TO postgres;
+
 --
--- Name: member_departments; Type: TABLE; Schema: public; Owner: -
+-- Name: member_departments; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.member_departments (
@@ -2388,8 +2554,10 @@ CREATE TABLE public.member_departments (
 );
 
 
+ALTER TABLE public.member_departments OWNER TO postgres;
+
 --
--- Name: member_facilities; Type: TABLE; Schema: public; Owner: -
+-- Name: member_facilities; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.member_facilities (
@@ -2398,8 +2566,10 @@ CREATE TABLE public.member_facilities (
 );
 
 
+ALTER TABLE public.member_facilities OWNER TO postgres;
+
 --
--- Name: org_invites; Type: TABLE; Schema: public; Owner: -
+-- Name: org_invites; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.org_invites (
@@ -2417,8 +2587,10 @@ CREATE TABLE public.org_invites (
 );
 
 
+ALTER TABLE public.org_invites OWNER TO postgres;
+
 --
--- Name: org_invites_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: org_invites_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.org_invites_id_seq
@@ -2430,15 +2602,17 @@ CREATE SEQUENCE public.org_invites_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.org_invites_id_seq OWNER TO postgres;
+
 --
--- Name: org_invites_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: org_invites_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.org_invites_id_seq OWNED BY public.org_invites.id;
 
 
 --
--- Name: org_members; Type: TABLE; Schema: public; Owner: -
+-- Name: org_members; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.org_members (
@@ -2450,8 +2624,10 @@ CREATE TABLE public.org_members (
 );
 
 
+ALTER TABLE public.org_members OWNER TO postgres;
+
 --
--- Name: org_members_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: org_members_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.org_members_id_seq
@@ -2463,15 +2639,17 @@ CREATE SEQUENCE public.org_members_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.org_members_id_seq OWNER TO postgres;
+
 --
--- Name: org_members_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: org_members_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.org_members_id_seq OWNED BY public.org_members.id;
 
 
 --
--- Name: organization_billing; Type: TABLE; Schema: public; Owner: -
+-- Name: organization_billing; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.organization_billing (
@@ -2489,8 +2667,10 @@ CREATE TABLE public.organization_billing (
 );
 
 
+ALTER TABLE public.organization_billing OWNER TO postgres;
+
 --
--- Name: organizations; Type: TABLE; Schema: public; Owner: -
+-- Name: organizations; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.organizations (
@@ -2500,8 +2680,10 @@ CREATE TABLE public.organizations (
 );
 
 
+ALTER TABLE public.organizations OWNER TO postgres;
+
 --
--- Name: organizations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: organizations_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.organizations_id_seq
@@ -2513,15 +2695,17 @@ CREATE SEQUENCE public.organizations_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.organizations_id_seq OWNER TO postgres;
+
 --
--- Name: organizations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: organizations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.organizations_id_seq OWNED BY public.organizations.id;
 
 
 --
--- Name: push_subscriptions; Type: TABLE; Schema: public; Owner: -
+-- Name: push_subscriptions; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.push_subscriptions (
@@ -2538,8 +2722,10 @@ CREATE TABLE public.push_subscriptions (
 );
 
 
+ALTER TABLE public.push_subscriptions OWNER TO postgres;
+
 --
--- Name: push_subscriptions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: push_subscriptions_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.push_subscriptions_id_seq
@@ -2551,15 +2737,17 @@ CREATE SEQUENCE public.push_subscriptions_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.push_subscriptions_id_seq OWNER TO postgres;
+
 --
--- Name: push_subscriptions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: push_subscriptions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.push_subscriptions_id_seq OWNED BY public.push_subscriptions.id;
 
 
 --
--- Name: subscription_events; Type: TABLE; Schema: public; Owner: -
+-- Name: subscription_events; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.subscription_events (
@@ -2576,8 +2764,10 @@ CREATE TABLE public.subscription_events (
 );
 
 
+ALTER TABLE public.subscription_events OWNER TO postgres;
+
 --
--- Name: subscription_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: subscription_events_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.subscription_events_id_seq
@@ -2589,21 +2779,23 @@ CREATE SEQUENCE public.subscription_events_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.subscription_events_id_seq OWNER TO postgres;
+
 --
--- Name: subscription_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: subscription_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.subscription_events_id_seq OWNED BY public.subscription_events.id;
 
 
 --
--- Name: subscriptions; Type: TABLE; Schema: public; Owner: -
+-- Name: subscriptions; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.subscriptions (
     organization_id integer NOT NULL,
     status text DEFAULT 'trial'::text NOT NULL,
-    device_price numeric DEFAULT 0 NOT NULL,
+    device_price numeric DEFAULT 100 NOT NULL,
     period text DEFAULT 'yearly'::text NOT NULL,
     valid_until timestamp with time zone,
     device_limit integer,
@@ -2613,8 +2805,10 @@ CREATE TABLE public.subscriptions (
 );
 
 
+ALTER TABLE public.subscriptions OWNER TO postgres;
+
 --
--- Name: users; Type: TABLE; Schema: public; Owner: -
+-- Name: users; Type: TABLE; Schema: public; Owner: postgres
 --
 
 CREATE TABLE public.users (
@@ -2637,8 +2831,10 @@ CREATE TABLE public.users (
 );
 
 
+ALTER TABLE public.users OWNER TO postgres;
+
 --
--- Name: users_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+-- Name: users_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
 --
 
 CREATE SEQUENCE public.users_id_seq
@@ -2650,295 +2846,297 @@ CREATE SEQUENCE public.users_id_seq
     CACHE 1;
 
 
+ALTER SEQUENCE public.users_id_seq OWNER TO postgres;
+
 --
--- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+-- Name: users_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: postgres
 --
 
 ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
 
 
 --
--- Name: _hyper_1_15_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_15_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_15_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_1_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_1_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_1_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_24_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_24_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_24_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_25_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_25_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_25_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_26_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_26_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_26_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_27_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_27_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_27_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_2_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_2_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_2_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_33_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_33_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_33_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_1_5_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_5_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_1_5_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_3_16_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_16_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_3_16_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_3_28_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_28_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_3_28_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_3_3_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_3_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_3_3_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_3_4_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_4_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_3_4_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_4_17_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_17_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_4_17_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_4_29_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_29_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_4_29_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_4_6_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_6_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_4_6_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_5_18_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_18_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_5_18_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_5_30_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_30_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_5_30_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_5_7_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_7_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_5_7_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_6_19_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_19_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_6_19_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_6_31_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_31_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_6_31_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_6_8_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_8_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_6_8_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_7_20_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_20_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_7_20_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_7_32_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_32_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_7_32_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: _hyper_7_9_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_9_chunk time; Type: DEFAULT; Schema: _timescaledb_internal; Owner: postgres
 --
 
 ALTER TABLE ONLY _timescaledb_internal._hyper_7_9_chunk ALTER COLUMN "time" SET DEFAULT now();
 
 
 --
--- Name: alarm_events id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: alarm_events id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.alarm_events ALTER COLUMN id SET DEFAULT nextval('public.alarm_events_id_seq'::regclass);
 
 
 --
--- Name: alarm_rules id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: alarm_rules id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.alarm_rules ALTER COLUMN id SET DEFAULT nextval('public.alarm_rules_id_seq'::regclass);
 
 
 --
--- Name: audit_log id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: audit_log id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.audit_log ALTER COLUMN id SET DEFAULT nextval('public.audit_log_id_seq'::regclass);
 
 
 --
--- Name: deletion_requests id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: deletion_requests id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.deletion_requests ALTER COLUMN id SET DEFAULT nextval('public.deletion_requests_id_seq'::regclass);
 
 
 --
--- Name: departments id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: departments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.departments ALTER COLUMN id SET DEFAULT nextval('public.departments_id_seq'::regclass);
 
 
 --
--- Name: devices id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: devices id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.devices ALTER COLUMN id SET DEFAULT nextval('public.devices_id_seq'::regclass);
 
 
 --
--- Name: facilities id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: facilities id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.facilities ALTER COLUMN id SET DEFAULT nextval('public.facilities_id_seq'::regclass);
 
 
 --
--- Name: firmware_builds id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: firmware_builds id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.firmware_builds ALTER COLUMN id SET DEFAULT nextval('public.firmware_builds_id_seq'::regclass);
 
 
 --
--- Name: iyzico_payments id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: iyzico_payments id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.iyzico_payments ALTER COLUMN id SET DEFAULT nextval('public.iyzico_payments_id_seq'::regclass);
 
 
 --
--- Name: org_invites id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: org_invites id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_invites ALTER COLUMN id SET DEFAULT nextval('public.org_invites_id_seq'::regclass);
 
 
 --
--- Name: org_members id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: org_members id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_members ALTER COLUMN id SET DEFAULT nextval('public.org_members_id_seq'::regclass);
 
 
 --
--- Name: organizations id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: organizations id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.organizations ALTER COLUMN id SET DEFAULT nextval('public.organizations_id_seq'::regclass);
 
 
 --
--- Name: push_subscriptions id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: push_subscriptions id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.push_subscriptions ALTER COLUMN id SET DEFAULT nextval('public.push_subscriptions_id_seq'::regclass);
 
 
 --
--- Name: subscription_events id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: subscription_events id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.subscription_events ALTER COLUMN id SET DEFAULT nextval('public.subscription_events_id_seq'::regclass);
 
 
 --
--- Name: users id; Type: DEFAULT; Schema: public; Owner: -
+-- Name: users id; Type: DEFAULT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.users ALTER COLUMN id SET DEFAULT nextval('public.users_id_seq'::regclass);
 
 
 --
--- Name: alarm_events alarm_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: alarm_events alarm_events_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.alarm_events
@@ -2946,7 +3144,7 @@ ALTER TABLE ONLY public.alarm_events
 
 
 --
--- Name: alarm_rules alarm_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: alarm_rules alarm_rules_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.alarm_rules
@@ -2954,7 +3152,7 @@ ALTER TABLE ONLY public.alarm_rules
 
 
 --
--- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: audit_log audit_log_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.audit_log
@@ -2962,7 +3160,7 @@ ALTER TABLE ONLY public.audit_log
 
 
 --
--- Name: deletion_requests deletion_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: deletion_requests deletion_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.deletion_requests
@@ -2970,7 +3168,7 @@ ALTER TABLE ONLY public.deletion_requests
 
 
 --
--- Name: departments departments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: departments departments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.departments
@@ -2978,7 +3176,7 @@ ALTER TABLE ONLY public.departments
 
 
 --
--- Name: device_info device_info_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: device_info device_info_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.device_info
@@ -2986,7 +3184,7 @@ ALTER TABLE ONLY public.device_info
 
 
 --
--- Name: device_mqtt_credentials device_mqtt_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: device_mqtt_credentials device_mqtt_credentials_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.device_mqtt_credentials
@@ -2994,7 +3192,7 @@ ALTER TABLE ONLY public.device_mqtt_credentials
 
 
 --
--- Name: device_settings device_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: device_settings device_settings_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.device_settings
@@ -3002,7 +3200,7 @@ ALTER TABLE ONLY public.device_settings
 
 
 --
--- Name: device_tariff device_tariff_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: device_tariff device_tariff_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.device_tariff
@@ -3010,7 +3208,7 @@ ALTER TABLE ONLY public.device_tariff
 
 
 --
--- Name: devices devices_device_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: devices devices_device_id_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.devices
@@ -3018,7 +3216,7 @@ ALTER TABLE ONLY public.devices
 
 
 --
--- Name: devices devices_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: devices devices_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.devices
@@ -3026,7 +3224,7 @@ ALTER TABLE ONLY public.devices
 
 
 --
--- Name: facilities facilities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: facilities facilities_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.facilities
@@ -3034,7 +3232,7 @@ ALTER TABLE ONLY public.facilities
 
 
 --
--- Name: firmware_builds firmware_builds_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: firmware_builds firmware_builds_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.firmware_builds
@@ -3042,7 +3240,7 @@ ALTER TABLE ONLY public.firmware_builds
 
 
 --
--- Name: iyzico_payments iyzico_payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: iyzico_payments iyzico_payments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.iyzico_payments
@@ -3050,7 +3248,7 @@ ALTER TABLE ONLY public.iyzico_payments
 
 
 --
--- Name: iyzico_payments iyzico_payments_token_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: iyzico_payments iyzico_payments_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.iyzico_payments
@@ -3058,7 +3256,7 @@ ALTER TABLE ONLY public.iyzico_payments
 
 
 --
--- Name: member_departments member_departments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: member_departments member_departments_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.member_departments
@@ -3066,7 +3264,7 @@ ALTER TABLE ONLY public.member_departments
 
 
 --
--- Name: member_facilities member_facilities_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: member_facilities member_facilities_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.member_facilities
@@ -3074,7 +3272,7 @@ ALTER TABLE ONLY public.member_facilities
 
 
 --
--- Name: org_invites org_invites_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: org_invites org_invites_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_invites
@@ -3082,7 +3280,7 @@ ALTER TABLE ONLY public.org_invites
 
 
 --
--- Name: org_invites org_invites_token_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: org_invites org_invites_token_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_invites
@@ -3090,7 +3288,7 @@ ALTER TABLE ONLY public.org_invites
 
 
 --
--- Name: org_members org_members_organization_id_username_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: org_members org_members_organization_id_username_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_members
@@ -3098,7 +3296,7 @@ ALTER TABLE ONLY public.org_members
 
 
 --
--- Name: org_members org_members_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: org_members org_members_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_members
@@ -3106,7 +3304,7 @@ ALTER TABLE ONLY public.org_members
 
 
 --
--- Name: organization_billing organization_billing_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: organization_billing organization_billing_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.organization_billing
@@ -3114,7 +3312,7 @@ ALTER TABLE ONLY public.organization_billing
 
 
 --
--- Name: organizations organizations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: organizations organizations_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.organizations
@@ -3122,7 +3320,7 @@ ALTER TABLE ONLY public.organizations
 
 
 --
--- Name: push_subscriptions push_subscriptions_endpoint_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: push_subscriptions push_subscriptions_endpoint_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.push_subscriptions
@@ -3130,7 +3328,7 @@ ALTER TABLE ONLY public.push_subscriptions
 
 
 --
--- Name: push_subscriptions push_subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: push_subscriptions push_subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.push_subscriptions
@@ -3138,7 +3336,7 @@ ALTER TABLE ONLY public.push_subscriptions
 
 
 --
--- Name: subscription_events subscription_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: subscription_events subscription_events_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.subscription_events
@@ -3146,7 +3344,7 @@ ALTER TABLE ONLY public.subscription_events
 
 
 --
--- Name: subscriptions subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: subscriptions subscriptions_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.subscriptions
@@ -3154,7 +3352,7 @@ ALTER TABLE ONLY public.subscriptions
 
 
 --
--- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: users users_email_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.users
@@ -3162,7 +3360,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- Name: users users_phone_unique; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: users users_phone_unique; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.users
@@ -3170,7 +3368,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.users
@@ -3178,7 +3376,7 @@ ALTER TABLE ONLY public.users
 
 
 --
--- Name: users users_username_key; Type: CONSTRAINT; Schema: public; Owner: -
+-- Name: users users_username_key; Type: CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.users
@@ -3186,763 +3384,763 @@ ALTER TABLE ONLY public.users
 
 
 --
--- Name: _hyper_10_14_chunk__materialized_hypertable_10_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_10_14_chunk__materialized_hypertable_10_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_10_14_chunk__materialized_hypertable_10_bucket_idx ON _timescaledb_internal._hyper_10_14_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_10_14_chunk__materialized_hypertable_10_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_10_14_chunk__materialized_hypertable_10_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_10_14_chunk__materialized_hypertable_10_device_id_bucket ON _timescaledb_internal._hyper_10_14_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_11_21_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_21_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_21_chunk__materialized_hypertable_11_bucket_idx ON _timescaledb_internal._hyper_11_21_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_11_21_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_21_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_21_chunk__materialized_hypertable_11_device_id_bucket ON _timescaledb_internal._hyper_11_21_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_11_22_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_22_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_22_chunk__materialized_hypertable_11_bucket_idx ON _timescaledb_internal._hyper_11_22_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_11_22_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_22_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_22_chunk__materialized_hypertable_11_device_id_bucket ON _timescaledb_internal._hyper_11_22_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_11_23_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_23_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_23_chunk__materialized_hypertable_11_bucket_idx ON _timescaledb_internal._hyper_11_23_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_11_23_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_23_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_23_chunk__materialized_hypertable_11_device_id_bucket ON _timescaledb_internal._hyper_11_23_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_11_34_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_34_chunk__materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_34_chunk__materialized_hypertable_11_bucket_idx ON _timescaledb_internal._hyper_11_34_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_11_34_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_11_34_chunk__materialized_hypertable_11_device_id_bucket; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_11_34_chunk__materialized_hypertable_11_device_id_bucket ON _timescaledb_internal._hyper_11_34_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_1_15_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_15_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_15_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_15_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_15_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_15_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_15_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_15_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_1_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_1_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_1_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_1_1_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_1_1_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_1_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_1_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_1_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_1_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_1_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_1_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_1_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_24_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_24_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_24_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_24_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_24_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_24_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_24_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_24_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_25_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_25_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_25_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_25_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_25_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_25_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_25_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_25_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_26_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_26_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_26_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_26_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_26_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_26_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_26_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_26_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_27_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_27_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_27_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_27_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_27_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_27_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_27_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_27_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_2_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_2_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_2_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_1_2_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_1_2_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_2_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_2_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_2_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_2_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_2_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_2_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_2_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_33_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_33_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_33_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_33_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_33_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_33_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_33_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_33_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_1_5_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_5_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_5_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_1_5_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_1_5_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_5_chunk_measurements_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_5_chunk_measurements_device_time_idx ON _timescaledb_internal._hyper_1_5_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_1_5_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_1_5_chunk_measurements_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_1_5_chunk_measurements_time_idx ON _timescaledb_internal._hyper_1_5_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_3_16_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_16_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_16_chunk_device_energy_device_time_idx ON _timescaledb_internal._hyper_3_16_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_3_16_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_16_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_16_chunk_device_energy_time_idx ON _timescaledb_internal._hyper_3_16_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_3_28_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_28_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_28_chunk_device_energy_device_time_idx ON _timescaledb_internal._hyper_3_28_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_3_28_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_28_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_28_chunk_device_energy_time_idx ON _timescaledb_internal._hyper_3_28_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_3_3_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_3_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_3_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_3_3_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_3_3_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_3_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_3_chunk_device_energy_device_time_idx ON _timescaledb_internal._hyper_3_3_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_3_3_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_3_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_3_chunk_device_energy_time_idx ON _timescaledb_internal._hyper_3_3_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_3_4_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_4_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_4_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_3_4_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_3_4_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_4_chunk_device_energy_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_4_chunk_device_energy_device_time_idx ON _timescaledb_internal._hyper_3_4_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_3_4_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_3_4_chunk_device_energy_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_3_4_chunk_device_energy_time_idx ON _timescaledb_internal._hyper_3_4_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_4_17_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_17_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_4_17_chunk_device_stats_device_time_idx ON _timescaledb_internal._hyper_4_17_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_4_17_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_17_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_4_17_chunk_device_stats_time_idx ON _timescaledb_internal._hyper_4_17_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_4_29_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_29_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_4_29_chunk_device_stats_device_time_idx ON _timescaledb_internal._hyper_4_29_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_4_29_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_29_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_4_29_chunk_device_stats_time_idx ON _timescaledb_internal._hyper_4_29_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_4_6_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_6_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_4_6_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_4_6_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_4_6_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_6_chunk_device_stats_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_4_6_chunk_device_stats_device_time_idx ON _timescaledb_internal._hyper_4_6_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_4_6_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_4_6_chunk_device_stats_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_4_6_chunk_device_stats_time_idx ON _timescaledb_internal._hyper_4_6_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_5_18_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_18_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_5_18_chunk_device_peaks_device_time_idx ON _timescaledb_internal._hyper_5_18_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_5_18_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_18_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_5_18_chunk_device_peaks_time_idx ON _timescaledb_internal._hyper_5_18_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_5_30_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_30_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_5_30_chunk_device_peaks_device_time_idx ON _timescaledb_internal._hyper_5_30_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_5_30_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_30_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_5_30_chunk_device_peaks_time_idx ON _timescaledb_internal._hyper_5_30_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_5_7_chunk_compressed_device_id_direction__ts_meta_v2_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_7_chunk_compressed_device_id_direction__ts_meta_v2_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_5_7_chunk_compressed_device_id_direction__ts_meta_v2_idx ON _timescaledb_internal._hyper_5_7_chunk_compressed USING btree (device_id, direction, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_5_7_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_7_chunk_device_peaks_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_5_7_chunk_device_peaks_device_time_idx ON _timescaledb_internal._hyper_5_7_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_5_7_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_5_7_chunk_device_peaks_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_5_7_chunk_device_peaks_time_idx ON _timescaledb_internal._hyper_5_7_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_6_19_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_19_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_6_19_chunk_device_demand_device_time_idx ON _timescaledb_internal._hyper_6_19_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_6_19_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_19_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_6_19_chunk_device_demand_time_idx ON _timescaledb_internal._hyper_6_19_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_6_31_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_31_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_6_31_chunk_device_demand_device_time_idx ON _timescaledb_internal._hyper_6_31_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_6_31_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_31_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_6_31_chunk_device_demand_time_idx ON _timescaledb_internal._hyper_6_31_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_6_8_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_8_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_6_8_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_6_8_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_6_8_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_8_chunk_device_demand_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_6_8_chunk_device_demand_device_time_idx ON _timescaledb_internal._hyper_6_8_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_6_8_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_6_8_chunk_device_demand_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_6_8_chunk_device_demand_time_idx ON _timescaledb_internal._hyper_6_8_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_7_20_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_20_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_7_20_chunk_device_harmonics_device_time_idx ON _timescaledb_internal._hyper_7_20_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_7_20_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_20_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_7_20_chunk_device_harmonics_time_idx ON _timescaledb_internal._hyper_7_20_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_7_32_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_32_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_7_32_chunk_device_harmonics_device_time_idx ON _timescaledb_internal._hyper_7_32_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_7_32_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_32_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_7_32_chunk_device_harmonics_time_idx ON _timescaledb_internal._hyper_7_32_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_7_9_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_9_chunk_compressed_device_id__ts_meta_v2_first_tim_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_7_9_chunk_compressed_device_id__ts_meta_v2_first_tim_idx ON _timescaledb_internal._hyper_7_9_chunk_compressed USING btree (device_id, _ts_meta_v2_first_time DESC, _ts_meta_v2_last_time DESC);
 
 
 --
--- Name: _hyper_7_9_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_9_chunk_device_harmonics_device_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_7_9_chunk_device_harmonics_device_time_idx ON _timescaledb_internal._hyper_7_9_chunk USING btree (device_id, "time" DESC);
 
 
 --
--- Name: _hyper_7_9_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_7_9_chunk_device_harmonics_time_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_7_9_chunk_device_harmonics_time_idx ON _timescaledb_internal._hyper_7_9_chunk USING btree ("time" DESC);
 
 
 --
--- Name: _hyper_9_11_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_11_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_11_chunk__materialized_hypertable_9_bucket_idx ON _timescaledb_internal._hyper_9_11_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_9_11_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_11_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_11_chunk__materialized_hypertable_9_device_id_bucket_i ON _timescaledb_internal._hyper_9_11_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_9_12_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_12_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_12_chunk__materialized_hypertable_9_bucket_idx ON _timescaledb_internal._hyper_9_12_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_9_12_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_12_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_12_chunk__materialized_hypertable_9_device_id_bucket_i ON _timescaledb_internal._hyper_9_12_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_9_13_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_13_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_13_chunk__materialized_hypertable_9_bucket_idx ON _timescaledb_internal._hyper_9_13_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_9_13_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_13_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_13_chunk__materialized_hypertable_9_device_id_bucket_i ON _timescaledb_internal._hyper_9_13_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _hyper_9_35_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_35_chunk__materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_35_chunk__materialized_hypertable_9_bucket_idx ON _timescaledb_internal._hyper_9_35_chunk USING btree (bucket DESC);
 
 
 --
--- Name: _hyper_9_35_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _hyper_9_35_chunk__materialized_hypertable_9_device_id_bucket_i; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _hyper_9_35_chunk__materialized_hypertable_9_device_id_bucket_i ON _timescaledb_internal._hyper_9_35_chunk USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _materialized_hypertable_10_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_10_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _materialized_hypertable_10_bucket_idx ON _timescaledb_internal._materialized_hypertable_10 USING btree (bucket DESC);
 
 
 --
--- Name: _materialized_hypertable_10_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_10_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _materialized_hypertable_10_device_id_bucket_idx ON _timescaledb_internal._materialized_hypertable_10 USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_11_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _materialized_hypertable_11_bucket_idx ON _timescaledb_internal._materialized_hypertable_11 USING btree (bucket DESC);
 
 
 --
--- Name: _materialized_hypertable_11_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_11_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _materialized_hypertable_11_device_id_bucket_idx ON _timescaledb_internal._materialized_hypertable_11 USING btree (device_id, bucket DESC);
 
 
 --
--- Name: _materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_9_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _materialized_hypertable_9_bucket_idx ON _timescaledb_internal._materialized_hypertable_9 USING btree (bucket DESC);
 
 
 --
--- Name: _materialized_hypertable_9_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: -
+-- Name: _materialized_hypertable_9_device_id_bucket_idx; Type: INDEX; Schema: _timescaledb_internal; Owner: postgres
 --
 
 CREATE INDEX _materialized_hypertable_9_device_id_bucket_idx ON _timescaledb_internal._materialized_hypertable_9 USING btree (device_id, bucket DESC);
 
 
 --
--- Name: alarm_events_device_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: alarm_events_device_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX alarm_events_device_time_idx ON public.alarm_events USING btree (device_id, triggered_at DESC);
 
 
 --
--- Name: alarm_rules_device_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: alarm_rules_device_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX alarm_rules_device_idx ON public.alarm_rules USING btree (device_id) WHERE enabled;
 
 
 --
--- Name: audit_log_actor_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: audit_log_actor_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX audit_log_actor_idx ON public.audit_log USING btree (actor, at DESC);
 
 
 --
--- Name: audit_log_org_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: audit_log_org_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX audit_log_org_idx ON public.audit_log USING btree (organization_id, at DESC);
 
 
 --
--- Name: departments_facility_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: departments_facility_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX departments_facility_idx ON public.departments USING btree (facility_id);
 
 
 --
--- Name: device_demand_device_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_demand_device_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_demand_device_time_idx ON public.device_demand USING btree (device_id, "time" DESC);
 
 
 --
--- Name: device_demand_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_demand_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_demand_time_idx ON public.device_demand USING btree ("time" DESC);
 
 
 --
--- Name: device_energy_device_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_energy_device_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_energy_device_time_idx ON public.device_energy USING btree (device_id, "time" DESC);
 
 
 --
--- Name: device_energy_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_energy_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_energy_time_idx ON public.device_energy USING btree ("time" DESC);
 
 
 --
--- Name: device_harmonics_device_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_harmonics_device_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_harmonics_device_time_idx ON public.device_harmonics USING btree (device_id, "time" DESC);
 
 
 --
--- Name: device_harmonics_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_harmonics_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_harmonics_time_idx ON public.device_harmonics USING btree ("time" DESC);
 
 
 --
--- Name: device_peaks_device_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_peaks_device_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_peaks_device_time_idx ON public.device_peaks USING btree (device_id, "time" DESC);
 
 
 --
--- Name: device_peaks_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_peaks_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_peaks_time_idx ON public.device_peaks USING btree ("time" DESC);
 
 
 --
--- Name: device_stats_device_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_stats_device_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_stats_device_time_idx ON public.device_stats USING btree (device_id, "time" DESC);
 
 
 --
--- Name: device_stats_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: device_stats_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX device_stats_time_idx ON public.device_stats USING btree ("time" DESC);
 
 
 --
--- Name: devices_department_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: devices_department_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX devices_department_idx ON public.devices USING btree (department_id);
 
 
 --
--- Name: devices_facility_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: devices_facility_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX devices_facility_idx ON public.devices USING btree (facility_id);
 
 
 --
--- Name: facilities_org_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: facilities_org_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX facilities_org_idx ON public.facilities USING btree (organization_id);
 
 
 --
--- Name: iyzico_payments_org_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: iyzico_payments_org_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX iyzico_payments_org_idx ON public.iyzico_payments USING btree (organization_id);
 
 
 --
--- Name: measurements_device_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: measurements_device_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX measurements_device_time_idx ON public.measurements USING btree (device_id, "time" DESC);
 
 
 --
--- Name: measurements_time_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: measurements_time_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX measurements_time_idx ON public.measurements USING btree ("time" DESC);
 
 
 --
--- Name: org_invites_org_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: org_invites_org_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX org_invites_org_idx ON public.org_invites USING btree (organization_id) WHERE (accepted_at IS NULL);
 
 
 --
--- Name: org_members_username_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: org_members_username_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX org_members_username_idx ON public.org_members USING btree (username);
 
 
 --
--- Name: push_subscriptions_user_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: push_subscriptions_user_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX push_subscriptions_user_idx ON public.push_subscriptions USING btree (username);
 
 
 --
--- Name: subscription_events_org_idx; Type: INDEX; Schema: public; Owner: -
+-- Name: subscription_events_org_idx; Type: INDEX; Schema: public; Owner: postgres
 --
 
 CREATE INDEX subscription_events_org_idx ON public.subscription_events USING btree (organization_id, created_at DESC);
 
 
 --
--- Name: alarm_events alarm_events_rule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: alarm_events alarm_events_rule_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.alarm_events
@@ -3950,7 +4148,7 @@ ALTER TABLE ONLY public.alarm_events
 
 
 --
--- Name: alarm_rules alarm_rules_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: alarm_rules alarm_rules_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.alarm_rules
@@ -3958,7 +4156,7 @@ ALTER TABLE ONLY public.alarm_rules
 
 
 --
--- Name: departments departments_facility_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: departments departments_facility_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.departments
@@ -3966,7 +4164,7 @@ ALTER TABLE ONLY public.departments
 
 
 --
--- Name: device_mqtt_credentials device_mqtt_credentials_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: device_mqtt_credentials device_mqtt_credentials_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.device_mqtt_credentials
@@ -3974,7 +4172,7 @@ ALTER TABLE ONLY public.device_mqtt_credentials
 
 
 --
--- Name: devices devices_department_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: devices devices_department_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.devices
@@ -3982,7 +4180,7 @@ ALTER TABLE ONLY public.devices
 
 
 --
--- Name: devices devices_facility_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: devices devices_facility_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.devices
@@ -3990,7 +4188,7 @@ ALTER TABLE ONLY public.devices
 
 
 --
--- Name: devices devices_owner_username_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: devices devices_owner_username_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.devices
@@ -3998,7 +4196,7 @@ ALTER TABLE ONLY public.devices
 
 
 --
--- Name: facilities facilities_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: facilities facilities_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.facilities
@@ -4006,7 +4204,7 @@ ALTER TABLE ONLY public.facilities
 
 
 --
--- Name: iyzico_payments iyzico_payments_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: iyzico_payments iyzico_payments_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.iyzico_payments
@@ -4014,7 +4212,7 @@ ALTER TABLE ONLY public.iyzico_payments
 
 
 --
--- Name: member_departments member_departments_department_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: member_departments member_departments_department_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.member_departments
@@ -4022,7 +4220,7 @@ ALTER TABLE ONLY public.member_departments
 
 
 --
--- Name: member_departments member_departments_member_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: member_departments member_departments_member_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.member_departments
@@ -4030,7 +4228,7 @@ ALTER TABLE ONLY public.member_departments
 
 
 --
--- Name: member_facilities member_facilities_facility_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: member_facilities member_facilities_facility_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.member_facilities
@@ -4038,7 +4236,7 @@ ALTER TABLE ONLY public.member_facilities
 
 
 --
--- Name: member_facilities member_facilities_member_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: member_facilities member_facilities_member_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.member_facilities
@@ -4046,7 +4244,7 @@ ALTER TABLE ONLY public.member_facilities
 
 
 --
--- Name: org_invites org_invites_invited_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: org_invites org_invites_invited_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_invites
@@ -4054,7 +4252,7 @@ ALTER TABLE ONLY public.org_invites
 
 
 --
--- Name: org_invites org_invites_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: org_invites org_invites_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_invites
@@ -4062,7 +4260,7 @@ ALTER TABLE ONLY public.org_invites
 
 
 --
--- Name: org_members org_members_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: org_members org_members_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_members
@@ -4070,7 +4268,7 @@ ALTER TABLE ONLY public.org_members
 
 
 --
--- Name: org_members org_members_username_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: org_members org_members_username_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.org_members
@@ -4078,7 +4276,7 @@ ALTER TABLE ONLY public.org_members
 
 
 --
--- Name: organization_billing organization_billing_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: organization_billing organization_billing_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.organization_billing
@@ -4086,7 +4284,7 @@ ALTER TABLE ONLY public.organization_billing
 
 
 --
--- Name: push_subscriptions push_subscriptions_username_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: push_subscriptions push_subscriptions_username_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.push_subscriptions
@@ -4094,7 +4292,7 @@ ALTER TABLE ONLY public.push_subscriptions
 
 
 --
--- Name: subscription_events subscription_events_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: subscription_events subscription_events_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.subscription_events
@@ -4102,7 +4300,7 @@ ALTER TABLE ONLY public.subscription_events
 
 
 --
--- Name: subscriptions subscriptions_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+-- Name: subscriptions subscriptions_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: postgres
 --
 
 ALTER TABLE ONLY public.subscriptions
@@ -4113,5 +4311,5 @@ ALTER TABLE ONLY public.subscriptions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict JP3bEwbYm6ddAfSRXGpyypebSgrL7s1p7X2TxF9NPvFyfjqdDhvn5tK5JsRfNwn
+\unrestrict luDTRxDEEw9aUfD4FRiB0W45CANnCwY2hsWV5qCqs5GsHwNW29NvxKBP7YBHd6z
 
