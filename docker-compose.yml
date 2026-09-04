@@ -55,6 +55,12 @@ services:
       RESEND_FROM: ${RESEND_FROM}
       GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID}
       GOOGLE_SERVICE_ACCOUNT_FILE: /app/google-service-account.json
+      # Bos birakilirsa odeme baslatma 502 ile temiz sekilde basarisiz olur --
+      # cokme yok. .env'e sandbox anahtarlarinizi eklemeniz yeterli, kod
+      # varsayilan olarak zaten sandbox taban URL'ine isaret ediyor.
+      IYZICO_API_KEY: ${IYZICO_API_KEY:-}
+      IYZICO_SECRET_KEY: ${IYZICO_SECRET_KEY:-}
+      IYZICO_BASE_URL: ${IYZICO_BASE_URL:-https://sandbox-api.iyzipay.com}
     volumes:
       - /root/google-service-account.json:/app/google-service-account.json:ro
       - avatar_uploads:/app/uploads
@@ -93,6 +99,9 @@ services:
       RESEND_FROM: ${RESEND_FROM}
       GOOGLE_SHEET_ID: ${GOOGLE_SHEET_ID}
       GOOGLE_SERVICE_ACCOUNT_FILE: /app/google-service-account.json
+      IYZICO_API_KEY: ${IYZICO_API_KEY:-}
+      IYZICO_SECRET_KEY: ${IYZICO_SECRET_KEY:-}
+      IYZICO_BASE_URL: ${IYZICO_BASE_URL:-https://sandbox-api.iyzipay.com}
     volumes:
       - /root/google-service-account.json:/app/google-service-account.json:ro
       - avatar_uploads_staging:/app/uploads
