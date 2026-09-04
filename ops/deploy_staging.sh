@@ -60,7 +60,7 @@ ssh "$HOST" "ln -sf /etc/nginx/sites-available/dashboard-staging /etc/nginx/site
 ssh "$HOST" "ufw allow 8443/tcp >/dev/null 2>&1 || true"
 
 echo "→ api ve compose kopyalanıyor"
-scp -q "$REPO/api.py" "$HOST:/root/api.py"
+scp -q "$REPO/api.py" "$REPO/iyzico.py" "$REPO/Dockerfile" "$REPO/requirements.txt" "$HOST:/root/"
 scp -q "$REPO/docker-compose.yml" "$HOST:/root/docker-compose.yml"
 
 # SADECE staging servisi ayağa kalkar. Üretim api'sine dokunulmaz: staging'e

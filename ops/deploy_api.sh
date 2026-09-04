@@ -23,7 +23,7 @@ else
 fi
 
 echo "→ api.py kopyalanıyor"
-scp -q "$REPO/api.py" "$HOST:/root/api.py"
+scp -q "$REPO/api.py" "$REPO/iyzico.py" "$REPO/Dockerfile" "$REPO/requirements.txt" "$HOST:/root/"
 scp -q "$REPO/docker-compose.yml" "$HOST:/root/docker-compose.yml"
 
 echo "→ üretim api yeniden kuruluyor"
