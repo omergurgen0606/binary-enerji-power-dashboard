@@ -21,13 +21,15 @@ import psycopg2
 import resend
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from google.oauth2.service_account import Credentials
 from PIL import Image
 from pydantic import BaseModel
+
+import iyzico
 
 DB_CONFIG = {
     "host": os.environ.get("DB_HOST", "timescaledb"),
@@ -1695,6 +1697,300 @@ def get_subscription(user: str = Depends(require_auth)):
         cur.close()
         conn.close()
     return state
+
+
+# ---------- Iyzico ödeme ----------
+#
+# Fiyat = cihaz sayısı × device_price (admin'in ayarladığı), tek dönem
+# (subscriptions.period 'monthly' ise 1 ay, 'yearly' ise 12 ay). Bu, admin
+# uzatma ekranındaki AYNI hesabı kullanıyor -- ödeme bunun otomatik tetiği,
+# fiyatlandırma mantığı değil.
+#
+# admin_update_subscription'daki uzatma koduna BİLEREK dokunulmadı: o zaten
+# üretimde çalışıyor ve test edilmiş; burada aynı mantık AYRI bir fonksiyonda
+# tekrarlandı. Ortak bir yardımcıya taşımak, iki farklı çağrı yolunu (admin
+# elle güncelleme / otomatik ödeme geri çağrısı) tek bir fonksiyonda
+# birleştirip ikisinden birinde hata riskini diğerine sıçratırdı.
+
+class BillingProfileRequest(BaseModel):
+    contact_name: str
+    identity_number: str  # TC kimlik no (şahıs) ya da vergi no (şirket)
+    email: str
+    phone: str
+    address: str
+    city: str
+    country: str = "Turkey"
+    zip_code: str | None = None
+
+
+@app.get("/subscription/billing")
+def get_billing_profile(user: str = Depends(require_auth)):
+    conn = db_connect()
+    cur = conn.cursor()
+    try:
+        org_id = _actor_org(user, cur)
+        if not org_id:
+            raise HTTPException(status_code=404, detail="Organizasyon bulunamadı")
+        cur.execute("""
+            SELECT contact_name, identity_number, email, phone, address, city, country, zip_code
+            FROM organization_billing WHERE organization_id = %s
+        """, (org_id,))
+        row = cur.fetchone()
+    finally:
+        cur.close()
+        conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Fatura bilgisi girilmemiş")
+    keys = ["contact_name", "identity_number", "email", "phone", "address", "city", "country", "zip_code"]
+    return dict(zip(keys, row))
+
+
+@app.put("/subscription/billing")
+def set_billing_profile(payload: BillingProfileRequest, user: str = Depends(require_auth)):
+    for alan, deger in payload.model_dump().items():
+        if alan != "zip_code" and not str(deger).strip():
+            raise HTTPException(status_code=400, detail=f"{alan} boş olamaz")
+    if not re.match(r"^\d{10,11}$", payload.identity_number.strip()):
+        raise HTTPException(status_code=400, detail="Kimlik/vergi numarası 10-11 haneli olmalı")
+
+    conn = db_connect()
+    conn.autocommit = True
+    cur = conn.cursor()
+    try:
+        org_id = _actor_org(user, cur)
+        if not org_id:
+            raise HTTPException(status_code=404, detail="Organizasyon bulunamadı")
+        cur.execute("""
+            INSERT INTO organization_billing
+                (organization_id, contact_name, identity_number, email, phone, address, city, country, zip_code, updated_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (organization_id) DO UPDATE SET
+                contact_name = EXCLUDED.contact_name, identity_number = EXCLUDED.identity_number,
+                email = EXCLUDED.email, phone = EXCLUDED.phone, address = EXCLUDED.address,
+                city = EXCLUDED.city, country = EXCLUDED.country, zip_code = EXCLUDED.zip_code,
+                updated_at = now(), updated_by = EXCLUDED.updated_by
+        """, (org_id, payload.contact_name.strip(), payload.identity_number.strip(), payload.email.strip(),
+              payload.phone.strip(), payload.address.strip(), payload.city.strip(),
+              payload.country.strip(), payload.zip_code.strip() if payload.zip_code else None, user))
+    finally:
+        cur.close()
+        conn.close()
+    return {"message": "Fatura bilgisi kaydedildi"}
+
+
+def _abonelik_fiyati(organization_id: int, cur) -> dict:
+    row = _subscription_row(organization_id, cur)
+    if not row:
+        raise HTTPException(status_code=404, detail="Abonelik kaydı yok")
+    cur.execute("""
+        SELECT count(DISTINCT d.device_id) FROM devices d
+        JOIN facilities f ON f.id = d.facility_id WHERE f.organization_id = %s
+    """, (organization_id,))
+    cihaz_sayisi = cur.fetchone()[0]
+    if cihaz_sayisi == 0:
+        raise HTTPException(status_code=400, detail="Ödeme için en az bir cihazınız olmalı")
+    months = 12 if row["period"] == "yearly" else 1
+    fiyat = round(cihaz_sayisi * row["device_price"] * months, 2)
+    if fiyat <= 0:
+        raise HTTPException(status_code=400, detail="Hesaplanan tutar geçersiz -- yöneticinizle iletişime geçin")
+    return {"device_count": cihaz_sayisi, "device_price": row["device_price"],
+            "months": months, "period": row["period"], "price": fiyat}
+
+
+@app.get("/subscription/price")
+def get_subscription_price(user: str = Depends(require_auth)):
+    """Ödeme ekranı, kullanıcıya ONAYLAMADAN önce göstermek için tutarı ayrı
+    sorguluyor -- checkout endpoint'i zaten aynı hesabı yapıyor ama kullanıcı
+    'öde'ye basmadan tutarı görebilmeli."""
+    conn = db_connect()
+    cur = conn.cursor()
+    try:
+        org_id = _actor_org(user, cur)
+        if not org_id:
+            raise HTTPException(status_code=404, detail="Organizasyon bulunamadı")
+        return _abonelik_fiyati(org_id, cur)
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.post("/subscription/checkout")
+def start_subscription_checkout(user: str = Depends(require_auth), request: Request = None):
+    check_rate_limit(f"checkout:{user}", max_attempts=10, window_seconds=60 * 60)
+
+    conn = db_connect()
+    conn.autocommit = True
+    cur = conn.cursor()
+    try:
+        org_id = _actor_org(user, cur)
+        if not org_id:
+            raise HTTPException(status_code=404, detail="Organizasyon bulunamadı")
+
+        cur.execute("""
+            SELECT contact_name, identity_number, email, phone, address, city, country, zip_code
+            FROM organization_billing WHERE organization_id = %s
+        """, (org_id,))
+        fatura = cur.fetchone()
+        if not fatura:
+            raise HTTPException(status_code=400, detail="Önce fatura bilgilerinizi girmelisiniz")
+        (ad, kimlik_no, eposta, telefon, adres, sehir, ulke, posta_kodu) = fatura
+
+        hesap = _abonelik_fiyati(org_id, cur)
+        conversation_id = secrets.token_hex(16)
+
+        buyer = {
+            "id": str(org_id),
+            "name": ad.split(" ")[0] if " " in ad else ad,
+            "surname": ad.split(" ", 1)[1] if " " in ad else "-",
+            "gsmNumber": telefon,
+            "email": eposta,
+            "identityNumber": kimlik_no,
+            "registrationAddress": adres,
+            "ip": (request.client.host if request and request.client else "127.0.0.1"),
+            "city": sehir,
+            "country": ulke,
+            "zipCode": posta_kodu or "00000",
+        }
+        billing_address = {
+            "contactName": ad, "city": sehir, "country": ulke,
+            "address": adres, "zipCode": posta_kodu or "00000",
+        }
+        donem_adi = "Yıllık" if hesap["period"] == "yearly" else "Aylık"
+        basket_items = [{
+            "id": f"abonelik-{org_id}",
+            "name": f"Binary Enerji Abonelik ({donem_adi}, {hesap['device_count']} cihaz)",
+            "category1": "Yazılım Hizmeti",
+            "itemType": "VIRTUAL",
+            "price": f"{hesap['price']:.2f}",
+        }]
+
+        try:
+            sonuc = iyzico.checkout_baslat(
+                conversation_id=conversation_id, price=hesap["price"],
+                callback_url=f"{SITE_URL}/api/subscription/callback",
+                buyer=buyer, billing_address=billing_address, basket_items=basket_items,
+            )
+        except iyzico.IyzicoHatasi as e:
+            raise HTTPException(status_code=502, detail=str(e))
+        except Exception as e:
+            logger.error("Iyzico checkout baslatma hatasi (%s): %s", user, e)
+            raise HTTPException(status_code=502, detail="Ödeme başlatılamadı, lütfen tekrar deneyin")
+
+        if sonuc.get("status") != "success":
+            raise HTTPException(status_code=502, detail=sonuc.get("errorMessage", "Ödeme başlatılamadı"))
+
+        cur.execute("""
+            INSERT INTO iyzico_payments
+                (organization_id, token, conversation_id, months,
+                 device_count_at_purchase, device_price_at_purchase, price, raw_response)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """, (org_id, sonuc["token"], conversation_id, hesap["months"],
+              hesap["device_count"], hesap["device_price"], hesap["price"], json.dumps(sonuc)))
+
+        audit("subscription.checkout_started", actor=user, organization_id=org_id,
+              detail={"price": hesap["price"], "months": hesap["months"]}, request=request, cur=cur)
+    finally:
+        cur.close()
+        conn.close()
+
+    return {"paymentPageUrl": sonuc.get("paymentPageUrl"), "token": sonuc["token"]}
+
+
+def _odeme_abonelik_uzat(organization_id: int, months: int, cur, kullanici: str = "iyzico") -> None:
+    """admin_update_subscription'daki ay uzatma mantığıyla AYNI (kalan süreyi
+    yakmaz), ama o fonksiyona dokunmadan burada ayrı tutuluyor -- bkz. yukarıdaki
+    modül notu."""
+    ensure_subscription(organization_id, cur)
+    mevcut = _subscription_row(organization_id, cur) or {}
+    now = datetime.now(timezone.utc)
+    temel = mevcut.get("valid_until")
+    baslangic = temel if (temel and temel > now) else now
+    yeni_bitis = baslangic + timedelta(days=30 * months)
+
+    cur.execute("""
+        UPDATE subscriptions SET status = 'active', valid_until = %s,
+               updated_at = now(), updated_by = %s
+        WHERE organization_id = %s
+    """, (yeni_bitis, kullanici, organization_id))
+
+    cur.execute("""
+        SELECT count(DISTINCT d.device_id) FROM devices d
+        JOIN facilities f ON f.id = d.facility_id WHERE f.organization_id = %s
+    """, (organization_id,))
+    cihaz = cur.fetchone()[0]
+    guncel = _subscription_row(organization_id, cur)
+    cur.execute("""
+        INSERT INTO subscription_events
+            (organization_id, action, valid_until, device_count, device_price, amount, note, created_by)
+        VALUES (%s, 'extended', %s, %s, %s, %s, %s, %s)
+    """, (organization_id, guncel["valid_until"], cihaz, guncel["device_price"],
+          round(cihaz * guncel["device_price"], 2), "Iyzico ödemesi", kullanici))
+
+
+@app.post("/subscription/callback")
+async def subscription_payment_callback(request: Request):
+    """Iyzico'nun ödeme sonrası çağırdığı uç nokta -- form-encoded POST,
+    "token" alanı taşıyor. Aynı zamanda kullanıcının tarayıcısı da buraya
+    yönlendiriliyor, o yüzden sonunda kullanıcıyı panele geri gönderiyoruz.
+
+    KRİTİK: tarayıcıdan/POST'tan gelen "başarılı" bilgisine ASLA güvenilmiyor.
+    token ile Iyzico'nun kendi sunucusuna (checkout_dogrula) soruluyor, kararı
+    o veriyor. Aksi halde biri callback'i taklit edip ödemesiz abonelik
+    açtırabilirdi.
+    """
+    form = await request.form()
+    token = form.get("token")
+    sonuc_url = f"{SITE_URL}/odeme"
+    if not token:
+        return RedirectResponse(f"{sonuc_url}?durum=hata", status_code=302)
+
+    conn = db_connect()
+    conn.autocommit = True
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT organization_id, months, status FROM iyzico_payments WHERE token = %s
+        """, (token,))
+        kayit = cur.fetchone()
+        if not kayit:
+            return RedirectResponse(f"{sonuc_url}?durum=hata", status_code=302)
+        org_id, months, mevcut_durum = kayit
+
+        # Idempotency: Iyzico callback'i tekrar gonderebilir, ya da kullanici
+        # sonuc sayfasini yeniler -- ayni token ikinci kez BURAYA gelirse
+        # aboneligi TEKRAR uzatmiyoruz.
+        if mevcut_durum == "success":
+            return RedirectResponse(f"{sonuc_url}?durum=basarili", status_code=302)
+
+        try:
+            dogrulama = iyzico.checkout_dogrula(token)
+        except Exception as e:
+            logger.error("Iyzico dogrulama hatasi (token=%s): %s", token, e)
+            return RedirectResponse(f"{sonuc_url}?durum=hata", status_code=302)
+
+        basarili = (dogrulama.get("status") == "success"
+                    and dogrulama.get("paymentStatus") == "SUCCESS"
+                    and dogrulama.get("fraudStatus") != -1)
+
+        cur.execute("""
+            UPDATE iyzico_payments SET status = %s, iyzico_payment_id = %s,
+                   raw_response = %s, completed_at = now()
+            WHERE token = %s
+        """, ("success" if basarili else "failure", dogrulama.get("paymentId"),
+              json.dumps(dogrulama), token))
+
+        if basarili:
+            _odeme_abonelik_uzat(org_id, months, cur)
+            audit("subscription.payment_success", organization_id=org_id,
+                  detail={"paymentId": dogrulama.get("paymentId"), "months": months}, cur=cur)
+            return RedirectResponse(f"{sonuc_url}?durum=basarili", status_code=302)
+        else:
+            audit("subscription.payment_failed", organization_id=org_id,
+                  detail={"token": token}, cur=cur)
+            return RedirectResponse(f"{sonuc_url}?durum=basarisiz", status_code=302)
+    finally:
+        cur.close()
+        conn.close()
 
 
 # ---------- Yönetici: abonelik yönetimi ----------

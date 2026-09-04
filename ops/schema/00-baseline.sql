@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict UVmLMxz1P7TJvs4MQXWJeWsY8ywGeaggysVJECRFyWwj01pJEeDvf48yBcvW1z0
+\restrict JP3bEwbYm6ddAfSRXGpyypebSgrL7s1p7X2TxF9NPvFyfjqdDhvn5tK5JsRfNwn
 
 -- Dumped from database version 16.14
 -- Dumped by pg_dump version 16.14
@@ -2186,6 +2186,47 @@ ALTER SEQUENCE public.firmware_builds_id_seq OWNED BY public.firmware_builds.id;
 
 
 --
+-- Name: iyzico_payments; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.iyzico_payments (
+    id integer NOT NULL,
+    organization_id integer NOT NULL,
+    token text NOT NULL,
+    conversation_id text NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    months integer NOT NULL,
+    device_count_at_purchase integer NOT NULL,
+    device_price_at_purchase numeric NOT NULL,
+    price numeric NOT NULL,
+    iyzico_payment_id text,
+    raw_response jsonb,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    completed_at timestamp with time zone
+);
+
+
+--
+-- Name: iyzico_payments_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.iyzico_payments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: iyzico_payments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.iyzico_payments_id_seq OWNED BY public.iyzico_payments.id;
+
+
+--
 -- Name: measurements_10min; Type: VIEW; Schema: public; Owner: -
 --
 
@@ -2427,6 +2468,25 @@ CREATE SEQUENCE public.org_members_id_seq
 --
 
 ALTER SEQUENCE public.org_members_id_seq OWNED BY public.org_members.id;
+
+
+--
+-- Name: organization_billing; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.organization_billing (
+    organization_id integer NOT NULL,
+    contact_name text NOT NULL,
+    identity_number text NOT NULL,
+    email text NOT NULL,
+    phone text NOT NULL,
+    address text NOT NULL,
+    city text NOT NULL,
+    country text DEFAULT 'Turkey'::text NOT NULL,
+    zip_code text,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_by text
+);
 
 
 --
@@ -2829,6 +2889,13 @@ ALTER TABLE ONLY public.firmware_builds ALTER COLUMN id SET DEFAULT nextval('pub
 
 
 --
+-- Name: iyzico_payments id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.iyzico_payments ALTER COLUMN id SET DEFAULT nextval('public.iyzico_payments_id_seq'::regclass);
+
+
+--
 -- Name: org_invites id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2975,6 +3042,22 @@ ALTER TABLE ONLY public.firmware_builds
 
 
 --
+-- Name: iyzico_payments iyzico_payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.iyzico_payments
+    ADD CONSTRAINT iyzico_payments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: iyzico_payments iyzico_payments_token_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.iyzico_payments
+    ADD CONSTRAINT iyzico_payments_token_key UNIQUE (token);
+
+
+--
 -- Name: member_departments member_departments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3020,6 +3103,14 @@ ALTER TABLE ONLY public.org_members
 
 ALTER TABLE ONLY public.org_members
     ADD CONSTRAINT org_members_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: organization_billing organization_billing_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_billing
+    ADD CONSTRAINT organization_billing_pkey PRIMARY KEY (organization_id);
 
 
 --
@@ -3802,6 +3893,13 @@ CREATE INDEX facilities_org_idx ON public.facilities USING btree (organization_i
 
 
 --
+-- Name: iyzico_payments_org_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX iyzico_payments_org_idx ON public.iyzico_payments USING btree (organization_id);
+
+
+--
 -- Name: measurements_device_time_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3908,6 +4006,14 @@ ALTER TABLE ONLY public.facilities
 
 
 --
+-- Name: iyzico_payments iyzico_payments_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.iyzico_payments
+    ADD CONSTRAINT iyzico_payments_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id);
+
+
+--
 -- Name: member_departments member_departments_department_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3972,6 +4078,14 @@ ALTER TABLE ONLY public.org_members
 
 
 --
+-- Name: organization_billing organization_billing_organization_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.organization_billing
+    ADD CONSTRAINT organization_billing_organization_id_fkey FOREIGN KEY (organization_id) REFERENCES public.organizations(id) ON DELETE CASCADE;
+
+
+--
 -- Name: push_subscriptions push_subscriptions_username_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3999,5 +4113,5 @@ ALTER TABLE ONLY public.subscriptions
 -- PostgreSQL database dump complete
 --
 
-\unrestrict UVmLMxz1P7TJvs4MQXWJeWsY8ywGeaggysVJECRFyWwj01pJEeDvf48yBcvW1z0
+\unrestrict JP3bEwbYm6ddAfSRXGpyypebSgrL7s1p7X2TxF9NPvFyfjqdDhvn5tK5JsRfNwn
 

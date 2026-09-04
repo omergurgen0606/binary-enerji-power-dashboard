@@ -48,7 +48,7 @@ echo "→ çalışma kopyası konteynere alınıyor"
 CID=$(ssh "$HOST" "docker ps -qf 'name=^root-api-1\$'")
 RUNDIR=/tmp/binaryenerji-test
 ssh "$HOST" "docker exec $CID sh -c 'rm -rf $RUNDIR && mkdir -p $RUNDIR'"
-tar czf - -C "$REPO" tests api.py | ssh "$HOST" "docker exec -i $CID tar xzf - -C $RUNDIR"
+tar czf - -C "$REPO" tests api.py iyzico.py | ssh "$HOST" "docker exec -i $CID tar xzf - -C $RUNDIR"
 
 echo "→ pytest"
 ssh "$HOST" "docker exec -e POSTGRES_DB=$TEST_DB $CID sh -c '
