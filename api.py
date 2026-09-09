@@ -208,6 +208,17 @@ JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 30
 
+# ---------- Binary Sarj tek oturum (SSO) ----------
+# Binary Sarj ayri bir servis ve ayri bir kullanici tablosu tutuyor. Panelde
+# oturum acmis kullanici, sarj tarafinda tekrar giris yapmasin diye burada kisa
+# omurlu, tek kullanimlik bir "devir bileti" imzalaniyor. Parola veya panel
+# token'i karsi tarafa hicbir zaman gitmiyor.
+# Sir tanimli degilse uc nokta 503 doner -- eksik yapilandirma sessizce
+# guvenligi zayiflatmak yerine acikca kapali kalir.
+BINARY_SARJ_SSO_SECRET = os.environ.get("BINARY_SARJ_SSO_SECRET")
+BINARY_SARJ_URL = os.environ.get("BINARY_SARJ_URL", "https://binaryenerji.com/sarj")
+BINARY_SARJ_TICKET_SECONDS = 60
+
 resend.api_key = os.environ["RESEND_API_KEY"]
 RESEND_FROM = os.environ["RESEND_FROM"]
 
@@ -248,6 +259,11 @@ if IS_STAGING:
     # paylassalardi staging'de acilan bir oturum uretim panelini de acardi.
     # Ayri bir ortam degiskeni yerine turetiyoruz: eklemeyi unutmak mumkun degil.
     JWT_SECRET = hashlib.sha256(("staging:" + JWT_SECRET).encode()).hexdigest()
+    # Ayni gerekce SSO sirri icin de gecerli: staging'de uretilen bir devir
+    # bileti uretim sarj hesabini acmamali.
+    if BINARY_SARJ_SSO_SECRET:
+        BINARY_SARJ_SSO_SECRET = hashlib.sha256(
+            ("staging:" + BINARY_SARJ_SSO_SECRET).encode()).hexdigest()
 
 app = FastAPI()
 app.add_middleware(
@@ -826,6 +842,63 @@ def get_me(user: str = Depends(require_auth)):
         "role": row[8],
         "monthly_report": row[9],
         "alarm_email": row[10],
+    }
+
+
+@app.post("/sso/binary-sarj")
+def binary_sarj_sso(request: Request, user: str = Depends(require_auth)):
+    """Panelde oturum acmis kullanici icin Binary Sarj devir bileti uretir.
+
+    Bilet 60 saniye gecerli ve tek kullanimlik (karsi taraf jti'yi saklayip
+    ikinci kullanimi reddediyor). Icinde yalnizca kimlik alanlari var; parola
+    ozeti veya panel token'i tasinmiyor.
+    """
+    if not BINARY_SARJ_SSO_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Binary Sarj baglantisi bu ortamda yapilandirilmamis.",
+        )
+
+    # Bilet uretimi ucuz ama sinirsiz olmamali: calinan bir panel token'i ile
+    # sinirsiz sarj oturumu acilmasini zorlastirir.
+    check_rate_limit(f"sso-binary-sarj:{user}", 20, 60)
+
+    conn = db_connect()
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT first_name, last_name, email, phone FROM users WHERE username = %s",
+        (user,),
+    )
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Kullanici bulunamadi")
+
+    first_name, last_name, email, phone = row
+    full_name = " ".join(x for x in [first_name, last_name] if x).strip()
+
+    now = datetime.now(timezone.utc)
+    ticket = jwt.encode(
+        {
+            "iss": "binaryenerji",
+            "aud": "binarysarj",
+            "sub": user,
+            "name": full_name or user,
+            "email": email or "",
+            "phone": phone or "",
+            "iat": int(now.timestamp()),
+            "exp": int((now + timedelta(seconds=BINARY_SARJ_TICKET_SECONDS)).timestamp()),
+            "jti": secrets.token_urlsafe(16),
+        },
+        BINARY_SARJ_SSO_SECRET,
+        algorithm="HS256",
+    )
+    logger.info("Binary Sarj devir bileti uretildi: %s", user)
+    return {
+        "handoff_token": ticket,
+        "expires_in": BINARY_SARJ_TICKET_SECONDS,
+        "url": BINARY_SARJ_URL,
     }
 
 class ChangePasswordRequest(BaseModel):
