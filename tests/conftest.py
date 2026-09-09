@@ -7,6 +7,8 @@ production'a yazmak yerine hiç başlamıyor.
 """
 import os
 import sys
+import tempfile
+
 import pytest
 
 TEST_DB_NAME = "binaryenerji_test"
@@ -23,6 +25,10 @@ os.environ.setdefault("RESEND_FROM", "test <no-reply@example.com>")
 os.environ.setdefault("GOOGLE_SHEET_ID", "test")
 os.environ.setdefault("GOOGLE_SERVICE_ACCOUNT_FILE", "/dev/null")
 os.environ.setdefault("SITE_URL", "http://test.local")
+# Varsayılanları /app/uploads/... üretim konteynerine göre; konteyner
+# dışında (CI veya yerel) o dizinlere yazma izni yok.
+os.environ.setdefault("AVATAR_DIR", os.path.join(tempfile.gettempdir(), "binaryenerji-test-avatars"))
+os.environ.setdefault("FIRMWARE_DIR", os.path.join(tempfile.gettempdir(), "binaryenerji-test-firmware"))
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import api  # noqa: E402
