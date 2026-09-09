@@ -7,7 +7,10 @@ import './index.css';
 // her biri kendi API'sine gider. Sabit yazılsaydı staging bundle'ı üretim
 // API'sini çağırırdı -- yani staging hiçbir şeyi izole etmezdi.
 // Yerel geliştirmede (vite dev sunucusu) böyle bir /api yolu yok, üretime düşer.
-const API_ORIGIN = import.meta.env.DEV ? 'https://binaryenerji.com' : window.location.origin;
+// VITE_API_ORIGIN, yerel/staging bir API'ye karsi calismak icin kacis kapisi:
+// tanimliysa her seyin onunde gelir. Tanimli degilse davranis eskisi gibi.
+const API_ORIGIN = import.meta.env.VITE_API_ORIGIN
+  || (import.meta.env.DEV ? 'https://binaryenerji.com' : window.location.origin);
 const API_BASE = `${API_ORIGIN}/api`;
 const WS_URL = `${API_ORIGIN.replace(/^http/, 'ws')}/ws/live`;
 
@@ -1771,7 +1774,7 @@ function InvitePage({ token, onLogin }) {
         {result ? (
           <>
             <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 8 }}>{result}</div>
-            <a href="/" style={{ fontSize: 13, color: 'var(--accent)' }}>Cihazlarıma git →</a>
+            <a href="/cihazlar" style={{ fontSize: 13, color: 'var(--accent)' }}>Cihazlarıma git →</a>
           </>
         ) : error ? (
           <>
@@ -2396,32 +2399,38 @@ function DeviceGroups({ devices, onSelect }) {
   );
 }
 
-function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, onOpenOrganization, isAdmin, token, onDeviceAdded, subscription }) {
+function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, onOpenOrganization, isAdmin, token, onDeviceAdded, subscription, onBackToHub }) {
   const [showAddForm, setShowAddForm] = useState(devices.length === 0);
 
   return (
     <div className="centered-page" style={{ maxWidth: 420, padding: '0 24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginBottom: -8 }}>
-        {isAdmin && (
-          <button onClick={onOpenFleet} style={{
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: -8 }}>
+        <button onClick={onBackToHub} style={{
+          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+          cursor: 'pointer', padding: 4,
+        }}>← Binary Enerji</button>
+        <div style={{ display: 'flex', gap: 12 }}>
+          {isAdmin && (
+            <button onClick={onOpenFleet} style={{
+              background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+              cursor: 'pointer', padding: 4, textDecoration: 'underline',
+            }}>
+              Cihaz Filosu
+            </button>
+          )}
+          <button onClick={onOpenOrganization} style={{
             background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
             cursor: 'pointer', padding: 4, textDecoration: 'underline',
           }}>
-            Cihaz Filosu
+            Organizasyon
           </button>
-        )}
-        <button onClick={onOpenOrganization} style={{
-          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
-          cursor: 'pointer', padding: 4, textDecoration: 'underline',
-        }}>
-          Organizasyon
-        </button>
-        <button onClick={onOpenAccount} style={{
-          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
-          cursor: 'pointer', padding: 4, textDecoration: 'underline',
-        }}>
-          Hesabım
-        </button>
+          <button onClick={onOpenAccount} style={{
+            background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+            cursor: 'pointer', padding: 4, textDecoration: 'underline',
+          }}>
+            Hesabım
+          </button>
+        </div>
       </div>
       <img className="marka-logo" src="/logo.png" alt="Binary Enerji" style={{ height: 32, display: 'block', margin: '0 auto 8px' }} />
       <div style={{ fontSize: 12, color: 'var(--muted)', letterSpacing: 1, marginBottom: 4, textAlign: 'center' }}>BINARY ENERJİ</div>
@@ -5476,6 +5485,123 @@ function TermsOfService() {
 // yerine siteden tamamen çıkıyordu. Artık URL tek doğruluk kaynağı: geri/ileri
 // kendiliğinden çalışıyor, sayfa yenilenince bulunduğunuz yer korunuyor ve
 // bir cihazın bağlantısı paylaşılabiliyor.
+// Binary Enerji artik iki urunun ortak girisi: enerji izleme (Cihazlarim) ve
+// elektrikli arac sarj agi (Binary Sarj). Giristen sonra kullanici once burada
+// hangi urune gidecegini seciyor.
+function HomeHub({ deviceCount, token, onOpenDevices, onOpenAccount, onLogout }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function openBinarySarj() {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await axios.post(`${API_BASE}/sso/binary-sarj`, {}, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      // Devir bileti URL fragment'inda tasiniyor. Fragment sunucuya hic
+      // gonderilmez -- boylece bilet ne erisim loglarina ne de bir sonraki
+      // isteğin Referer basligina duser.
+      window.location.href = `${res.data.url}#bilet=${encodeURIComponent(res.data.handoff_token)}`;
+    } catch (err) {
+      setError(err.response?.status === 503
+        ? 'Binary Şarj bağlantısı bu ortamda henüz etkin değil.'
+        : 'Binary Şarj açılamadı. Lütfen tekrar deneyin.');
+      setBusy(false);
+    }
+  }
+
+  const kart = {
+    background: 'var(--surface)',
+    border: '1px solid var(--border)',
+    borderRadius: 'var(--radius-lg)',
+    boxShadow: 'var(--shadow-card)',
+    padding: 24,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 10,
+    cursor: 'pointer',
+    textAlign: 'left',
+    font: 'inherit',
+    color: 'inherit',
+    width: '100%',
+  };
+
+  return (
+    <div className="centered-page" style={{ maxWidth: 720, padding: '0 24px' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginBottom: -8 }}>
+        <button onClick={onOpenAccount} style={{
+          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+          cursor: 'pointer', padding: 4, textDecoration: 'underline',
+        }}>Hesabım</button>
+        <button onClick={onLogout} style={{
+          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
+          cursor: 'pointer', padding: 4, textDecoration: 'underline',
+        }}>Çıkış</button>
+      </div>
+
+      <h1 style={{
+        margin: '0 0 6px', fontFamily: 'var(--font-display)', fontSize: 22,
+        fontWeight: 700, textAlign: 'center',
+      }}>Binary Enerji</h1>
+      <p style={{ margin: '0 0 24px', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
+        Hangi ürünle devam etmek istersiniz?
+      </p>
+
+      <div style={{
+        display: 'grid', gap: 14,
+        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+      }}>
+        <button type="button" onClick={onOpenDevices} style={kart}>
+          <span style={{ fontSize: 30, lineHeight: 1 }}>📟</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700 }}>
+            Cihazlarım
+          </span>
+          <span style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>
+            Enerji ölçerlerinizin canlı verisi, tüketim geçmişi, alarmlar ve raporlar.
+          </span>
+          <span style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 600, marginTop: 4 }}>
+            {deviceCount === 0
+              ? 'Henüz cihaz eklenmemiş →'
+              : `${deviceCount} cihaz →`}
+          </span>
+        </button>
+
+        <button type="button" onClick={openBinarySarj} disabled={busy} style={{
+          ...kart,
+          opacity: busy ? 0.6 : 1,
+          cursor: busy ? 'progress' : 'pointer',
+        }}>
+          <span style={{ fontSize: 30, lineHeight: 1 }}>⚡</span>
+          <span style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700 }}>
+            Binary Şarj
+          </span>
+          <span style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>
+            Elektrikli araç şarj ağı: istasyon haritası, rota planlayıcı, şarj geçmişi
+            ve evdeki şarjınız.
+          </span>
+          <span style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 600, marginTop: 4 }}>
+            {busy ? 'Açılıyor…' : 'Şarj ağına git →'}
+          </span>
+        </button>
+      </div>
+
+      {error && (
+        <div style={{
+          marginTop: 14, fontSize: 13, color: 'var(--danger)',
+          background: 'var(--surface)', border: '1px solid var(--danger)',
+          borderRadius: 'var(--radius-md)', padding: 12, lineHeight: 1.6,
+        }}>{error}</div>
+      )}
+
+      <p style={{ marginTop: 22, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
+        Tek hesap, iki ürün — Binary Şarj'a geçerken tekrar giriş yapmanız gerekmez.
+      </p>
+    </div>
+  );
+}
+
+
 function parseRoute(pathname) {
   if (pathname === '/odeme') return { ad: 'odeme' };
   if (pathname === '/gizlilik-politikasi') return { ad: 'gizlilik' };
@@ -5484,6 +5610,7 @@ function parseRoute(pathname) {
   if (pathname === '/hesabim') return { ad: 'hesabim' };
   if (pathname === '/filo') return { ad: 'filo' };
   if (pathname === '/organizasyon') return { ad: 'organizasyon' };
+  if (pathname === '/cihazlar') return { ad: 'liste' };
   const eslesme = pathname.match(/^\/cihaz\/([^/]+)(?:\/([^/]+))?\/?$/);
   if (eslesme) {
     return {
@@ -5492,7 +5619,8 @@ function parseRoute(pathname) {
       sekme: eslesme[2] && DASHBOARD_TABS.some((t) => t.key === eslesme[2]) ? eslesme[2] : 'canli',
     };
   }
-  return { ad: 'liste' };
+  // Bilinmeyen yollar ve kok yol ortak girise duser.
+  return { ad: 'hub' };
 }
 
 function useRoute() {
@@ -5579,7 +5707,7 @@ export default function App() {
   // bırakmasın -- listeye dönülüyor.
   useEffect(() => {
     if (route.ad === 'cihaz' && devices && !selectedDevice) {
-      navigate('/', { replace: true });
+      navigate('/cihazlar', { replace: true });
     }
   }, [route.ad, route.deviceId, devices, selectedDevice]);
 
@@ -5601,12 +5729,29 @@ export default function App() {
     return null;
   }
 
+  if (route.ad === 'hub') {
+    return (
+      <>
+        <HomeHub
+          deviceCount={devices?.length ?? 0}
+          token={token}
+          onOpenDevices={() => navigate('/cihazlar')}
+          onOpenAccount={() => navigate('/hesabim')}
+          onLogout={handleLogout}
+        />
+        <Footer />
+      </>
+    );
+  }
+
+  // Filo, organizasyon ve cihaz panelinden "geri", ortak girise degil cihaz
+  // listesine doner -- kullanici oraya listeden gelmisti.
   if (route.ad === 'filo') {
-    return <FleetPage token={token} onBack={() => navigate('/')} />;
+    return <FleetPage token={token} onBack={() => navigate('/cihazlar')} />;
   }
 
   if (route.ad === 'organizasyon') {
-    return <OrganizationPage token={token} onBack={() => navigate('/')} />;
+    return <OrganizationPage token={token} onBack={() => navigate('/cihazlar')} />;
   }
 
   if (route.ad === 'hesabim') {
@@ -5614,7 +5759,7 @@ export default function App() {
       <>
         <AccountPage
           token={token}
-          onBack={() => navigate('/')}
+          onBack={() => navigate('/cihazlar')}
           onLogout={handleLogout}
           deviceCount={devices?.length}
           theme={theme}
@@ -5638,7 +5783,7 @@ export default function App() {
             // replace: sekme geçişleri geçmişe yığılmasın, geri panelden çıksın.
             navigate(`/cihaz/${encodeURIComponent(selectedDevice.device_id)}/${t}`, { replace: true });
           }}
-          onBack={() => navigate('/')}
+          onBack={() => navigate('/cihazlar')}
           onLogout={handleLogout}
           theme={theme}
           subscription={subscription}
@@ -5652,6 +5797,7 @@ export default function App() {
   return (
     <>
       <DeviceList
+        onBackToHub={() => navigate('/')}
         devices={devices}
         onSelect={(device) => {
           let sonSekme = 'canli';
