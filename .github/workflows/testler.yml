@@ -19,7 +19,10 @@ jobs:
 
     services:
       postgres:
-        image: postgres:16
+        # ops/schema/00-baseline.sql "CREATE EXTENSION timescaledb" içeriyor;
+        # düz postgres imajında bu uzantı yok. docker-compose.yml'deki
+        # üretim imajıyla aynısını kullanıyoruz.
+        image: timescale/timescaledb:latest-pg16
         env:
           POSTGRES_PASSWORD: test
           POSTGRES_DB: binaryenerji_test
