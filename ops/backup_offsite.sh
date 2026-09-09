@@ -71,14 +71,21 @@ if [ -z "${BACKUP_REMOTE:-}" ]; then
 fi
 [ -z "${BACKUP_PASSPHRASE:-}" ] && fail "BACKUP_PASSPHRASE tanımlı değil (/root/.env)"
 
-SON_DB=$(ls -t "$BACKUP_DIR"/db_*.sql.gz 2>/dev/null | head -1)
+# db_*.sql.gz iki farklı veritabanının yedeğini eşleştirir (power-dashboard
+# VE binarysarj — bkz. backup.sh). "en son değişen TEK dosya" alınsaydı
+# ikisinden biri sessizce buluta hiç yüklenmezdi; bu yüzden iki grup AYRI
+# AYRI en-son'u alınıyor. `db_[0-9]*` yalnızca tarihle başlayanları (kendi
+# veritabanımız) eşler, `db_binarysarj_*` öbürünü.
+SON_DB=$(ls -t "$BACKUP_DIR"/db_[0-9]*.sql.gz 2>/dev/null | head -1)
+SON_SARJ_DB=$(ls -t "$BACKUP_DIR"/db_binarysarj_*.sql.gz 2>/dev/null | head -1)
 SON_UP=$(ls -t "$BACKUP_DIR"/uploads_*.tar.gz 2>/dev/null | head -1)
 [ -z "$SON_DB" ] && fail "yüklenecek veritabanı yedeği bulunamadı"
+[ -z "$SON_SARJ_DB" ] && fail "yüklenecek binarysarj veritabanı yedeği bulunamadı"
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 
-for DOSYA in "$SON_DB" "$SON_UP"; do
+for DOSYA in "$SON_DB" "$SON_SARJ_DB" "$SON_UP"; do
   [ -z "$DOSYA" ] && continue
   AD=$(basename "$DOSYA")
   # Yüklemeden ÖNCE bütünlük kontrolü: bozuk bir dosyayı buluta taşımak,
@@ -91,14 +98,17 @@ done
 
 rclone copy "$TMP" "$BACKUP_REMOTE/" --no-traverse 2>>"$LOG" || fail "rclone yükleme başarısız"
 
-# Yüklenen dosya gerçekten karşı tarafta mı?
+# Yüklenen dosyalar gerçekten karşı tarafta mı?
+UZAK_LISTE=$(rclone lsf "$BACKUP_REMOTE/" 2>/dev/null)
 YUKLENEN=$(basename "$SON_DB").gpg
-if ! rclone lsf "$BACKUP_REMOTE/" 2>/dev/null | grep -qx "$YUKLENEN"; then
-  fail "yükleme sonrası doğrulama başarısız: $YUKLENEN uzak tarafta görünmüyor"
-fi
+YUKLENEN_SARJ=$(basename "$SON_SARJ_DB").gpg
+echo "$UZAK_LISTE" | grep -qx "$YUKLENEN" \
+  || fail "yükleme sonrası doğrulama başarısız: $YUKLENEN uzak tarafta görünmüyor"
+echo "$UZAK_LISTE" | grep -qx "$YUKLENEN_SARJ" \
+  || fail "yükleme sonrası doğrulama başarısız: $YUKLENEN_SARJ uzak tarafta görünmüyor"
 
 # Buluttaki eski yedekleri temizle
 rclone delete "$BACKUP_REMOTE/" --min-age "${RETENTION_DAYS}d" 2>>"$LOG" || true
 
 BOYUT=$(du -sh "$TMP" | cut -f1)
-echo "$(date -Iseconds) OFFSITE OK: $YUKLENEN (+uploads), toplam ${BOYUT}, hedef ${BACKUP_REMOTE}" >> "$LOG"
+echo "$(date -Iseconds) OFFSITE OK: $YUKLENEN + $YUKLENEN_SARJ (+uploads), toplam ${BOYUT}, hedef ${BACKUP_REMOTE}" >> "$LOG"
