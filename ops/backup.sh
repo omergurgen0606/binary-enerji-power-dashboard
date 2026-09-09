@@ -13,6 +13,12 @@ cd "$COMPOSE_DIR" || exit 1
 
 DB_FILE="$BACKUP_DIR/db_${DATE}.sql.gz"
 UPLOADS_FILE="$BACKUP_DIR/uploads_${DATE}.tar.gz"
+# Binary Şarj aynı Postgres sürecinde AYRI bir veritabanı (binarysarj) —
+# bellek tasarrufu için ikinci bir Postgres konteyneri açmak yerine paylaşımlı
+# sürece eklendi (bkz. claude_code/infra/docker-compose.vps-shared.yml). Ayrı
+# veritabanı olduğu için "pg_dump ... postgres" onu KAPSAMAZ; unutulursa
+# Binary Şarj'ın istasyon/kullanıcı verisi hiç yedeklenmez.
+SARJ_DB_FILE="$BACKUP_DIR/db_binarysarj_${DATE}.sql.gz"
 
 send_alert() {
   local subject="$1"
@@ -46,6 +52,11 @@ if [ ! -s "$DB_FILE" ]; then
   fail "pg_dump başarısız veya boş çıktı verdi"
 fi
 
+docker compose exec -T timescaledb pg_dump -U postgres binarysarj 2>/dev/null | gzip > "$SARJ_DB_FILE"
+if [ ! -s "$SARJ_DB_FILE" ]; then
+  fail "binarysarj pg_dump başarısız veya boş çıktı verdi"
+fi
+
 if ! docker run --rm -v root_avatar_uploads:/data -v "$BACKUP_DIR":/backup alpine tar czf "/backup/uploads_${DATE}.tar.gz" -C /data . 2>/dev/null; then
   fail "uploads (avatar/firmware) yedeği başarısız"
 fi
@@ -55,5 +66,6 @@ find "$BACKUP_DIR" -name "db_*.sql.gz" -mtime +${RETENTION_DAYS} -delete
 find "$BACKUP_DIR" -name "uploads_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
 
 DB_SIZE=$(du -h "$DB_FILE" | cut -f1)
+SARJ_DB_SIZE=$(du -h "$SARJ_DB_FILE" | cut -f1)
 UP_SIZE=$(du -h "$UPLOADS_FILE" 2>/dev/null | cut -f1)
-echo "$(date -Iseconds) BACKUP OK: db=${DB_SIZE} uploads=${UP_SIZE}" >> "$BACKUP_DIR/backup.log"
+echo "$(date -Iseconds) BACKUP OK: db=${DB_SIZE} binarysarj=${SARJ_DB_SIZE} uploads=${UP_SIZE}" >> "$BACKUP_DIR/backup.log"
