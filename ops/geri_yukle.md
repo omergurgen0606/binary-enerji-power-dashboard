@@ -21,11 +21,42 @@ gzip -dc db.sql.gz | docker compose exec -T timescaledb psql -U postgres postgre
 > Geri yükleme mevcut veriyi **üzerine yazar**. Önce çalışan sistemin
 > yedeğini alın.
 
+## Binary Şarj veritabanını geri yükleme
+
+Binary Şarj, aynı Postgres sürecinde AYRI bir veritabanı (`binarysarj`) —
+yukarıdaki komut onu geri getirmez, dosyası da ayrı (`db_binarysarj_*.sql.gz`):
+
+```bash
+rclone copy b2:kova-adi/db_binarysarj_2026-08-28_0300.sql.gz.gpg .
+gpg --decrypt --output db_sarj.sql.gz db_binarysarj_2026-08-28_0300.sql.gz.gpg
+gzip -t db_sarj.sql.gz
+
+gzip -dc db_sarj.sql.gz | docker compose exec -T timescaledb psql -U postgres binarysarj
+```
+
 ## Yüklenen dosyalar (avatar/firmware)
 
 ```bash
 docker run --rm -v root_avatar_uploads:/data -v "$PWD":/backup alpine \
   tar xzf /backup/uploads_2026-08-28_0300.tar.gz -C /data
+```
+
+## Binary Şarj istasyon fotoğrafları
+
+Operatörün yüklediği görseller ayrı bir birimde; veritabanı yalnızca dosya
+**yolunu** tutuyor, dosyanın kendisi burada. Bu adım atlanırsa geri yüklenen
+istasyonlar kırık görsellerle açılır.
+
+```bash
+docker run --rm -v binarysarj_sarj_media:/data -v "$PWD":/backup alpine \
+  tar xzf /backup/sarj_media_2026-08-28_0300.tar.gz -C /data
+```
+
+Birim yeni oluşturulduysa sahipliği düzeltin — uygulama kök olmayan
+kullanıcıyla (uid 10001) çalışıyor ve root'a ait bir dizine yazamaz:
+
+```bash
+docker run --rm -v binarysarj_sarj_media:/data alpine chown -R 10001:10001 /data
 ```
 
 ## Yedeğin gerçekten sağlam olduğunu kontrol etme
