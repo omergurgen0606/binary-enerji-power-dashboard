@@ -19,6 +19,10 @@ UPLOADS_FILE="$BACKUP_DIR/uploads_${DATE}.tar.gz"
 # veritabanı olduğu için "pg_dump ... postgres" onu KAPSAMAZ; unutulursa
 # Binary Şarj'ın istasyon/kullanıcı verisi hiç yedeklenmez.
 SARJ_DB_FILE="$BACKUP_DIR/db_binarysarj_${DATE}.sql.gz"
+# Operatörün yüklediği istasyon fotoğrafları ayrı bir Docker biriminde
+# (binarysarj_sarj_media). Veritabanı yalnızca dosya YOLUNU tutuyor; birim
+# yedeklenmezse geri yüklemeden sonra istasyonlar kırık görsellerle açılır.
+SARJ_MEDIA_FILE="$BACKUP_DIR/sarj_media_${DATE}.tar.gz"
 
 send_alert() {
   local subject="$1"
@@ -61,11 +65,17 @@ if ! docker run --rm -v root_avatar_uploads:/data -v "$BACKUP_DIR":/backup alpin
   fail "uploads (avatar/firmware) yedeği başarısız"
 fi
 
+if ! docker run --rm -v binarysarj_sarj_media:/data -v "$BACKUP_DIR":/backup alpine tar czf "/backup/sarj_media_${DATE}.tar.gz" -C /data . 2>/dev/null; then
+  fail "binarysarj istasyon fotoğrafları yedeği başarısız"
+fi
+
 # 14 günden eski yedekleri temizle
 find "$BACKUP_DIR" -name "db_*.sql.gz" -mtime +${RETENTION_DAYS} -delete
 find "$BACKUP_DIR" -name "uploads_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
+find "$BACKUP_DIR" -name "sarj_media_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
 
 DB_SIZE=$(du -h "$DB_FILE" | cut -f1)
 SARJ_DB_SIZE=$(du -h "$SARJ_DB_FILE" | cut -f1)
 UP_SIZE=$(du -h "$UPLOADS_FILE" 2>/dev/null | cut -f1)
-echo "$(date -Iseconds) BACKUP OK: db=${DB_SIZE} binarysarj=${SARJ_DB_SIZE} uploads=${UP_SIZE}" >> "$BACKUP_DIR/backup.log"
+SARJ_MEDIA_SIZE=$(du -h "$SARJ_MEDIA_FILE" 2>/dev/null | cut -f1)
+echo "$(date -Iseconds) BACKUP OK: db=${DB_SIZE} binarysarj=${SARJ_DB_SIZE} uploads=${UP_SIZE} sarj_media=${SARJ_MEDIA_SIZE}" >> "$BACKUP_DIR/backup.log"

@@ -41,6 +41,24 @@ docker run --rm -v root_avatar_uploads:/data -v "$PWD":/backup alpine \
   tar xzf /backup/uploads_2026-08-28_0300.tar.gz -C /data
 ```
 
+## Binary Şarj istasyon fotoğrafları
+
+Operatörün yüklediği görseller ayrı bir birimde; veritabanı yalnızca dosya
+**yolunu** tutuyor, dosyanın kendisi burada. Bu adım atlanırsa geri yüklenen
+istasyonlar kırık görsellerle açılır.
+
+```bash
+docker run --rm -v binarysarj_sarj_media:/data -v "$PWD":/backup alpine \
+  tar xzf /backup/sarj_media_2026-08-28_0300.tar.gz -C /data
+```
+
+Birim yeni oluşturulduysa sahipliği düzeltin — uygulama kök olmayan
+kullanıcıyla (uid 10001) çalışıyor ve root'a ait bir dizine yazamaz:
+
+```bash
+docker run --rm -v binarysarj_sarj_media:/data alpine chown -R 10001:10001 /data
+```
+
 ## Yedeğin gerçekten sağlam olduğunu kontrol etme
 
 Yedeği hiç denemeden "yedeğim var" demek en yaygın hatadır.
