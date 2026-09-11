@@ -1049,7 +1049,7 @@ async def upload_avatar(file: UploadFile = File(...), user: str = Depends(requir
     return {"avatar_url": avatar_url_for(user, now)}
 
 # ---------- OTA: firmware yukleme/servis/tetikleme ----------
-VALID_DEVICE_TYPES = {"anl13", "anl21"}
+VALID_DEVICE_TYPES = {"anl13", "anl21", "ga1202"}
 
 def device_type_from_id(device_id: str) -> str | None:
     for t in VALID_DEVICE_TYPES:
