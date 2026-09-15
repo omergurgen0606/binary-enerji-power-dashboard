@@ -357,8 +357,26 @@ function AddDeviceForm({ token, compact, onAdded, onCancel }) {
   const [deviceId, setDeviceId] = useState('');
   const [deviceName, setDeviceName] = useState('');
   const [claimCode, setClaimCode] = useState('');
+  const [facilityId, setFacilityId] = useState('');
+  const [facilities, setFacilities] = useState(null); // null = henüz yüklenmedi
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const headers = { Authorization: `Bearer ${token}` };
+    axios.get(`${API_BASE}/organization`, { headers })
+      .then((res) => {
+        const { facilities: all, my_role, my_facility_ids } = res.data;
+        // resolve_target_facility'deki "allowed" hesabıyla birebir aynı:
+        // org_admin tüm tesisleri görür, diğer roller sadece atandığı tesisleri.
+        const allowed = my_role === 'org_admin'
+          ? all
+          : all.filter((f) => my_facility_ids.includes(f.id));
+        setFacilities(allowed);
+        if (allowed.length === 1) setFacilityId(String(allowed[0].id));
+      })
+      .catch(() => setFacilities([])); // organizasyon yoksa (tek kullanıcı) sessizce boş geç
+  }, [token]);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -366,10 +384,14 @@ function AddDeviceForm({ token, compact, onAdded, onCancel }) {
     if (!deviceName.trim() || !deviceId.trim() || !claimCode.trim()) {
       return setError('Cihaz adı, cihaz ID\'si ve kurulum kodu zorunlu');
     }
+    if (facilities && facilities.length > 1 && !facilityId) {
+      return setError('Birden fazla tesisiniz var, cihazın ekleneceği tesisi seçin');
+    }
     setLoading(true);
     try {
       await axios.post(`${API_BASE}/devices`, {
         device_id: deviceId.trim(), name: deviceName.trim(), claim_code: claimCode.trim(),
+        ...(facilityId ? { facility_id: Number(facilityId) } : {}),
       }, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -413,6 +435,18 @@ function AddDeviceForm({ token, compact, onAdded, onCancel }) {
         onChange={(e) => setClaimCode(e.target.value)}
         style={inputStyle}
       />
+      {facilities && facilities.length > 1 && (
+        <select
+          value={facilityId}
+          onChange={(e) => setFacilityId(e.target.value)}
+          style={inputStyle}
+        >
+          <option value="">Tesis seçin...</option>
+          {facilities.map((f) => (
+            <option key={f.id} value={f.id}>{f.name}</option>
+          ))}
+        </select>
+      )}
       {error && <div style={{ color: 'var(--danger)', fontSize: 13 }}>{error}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button type="submit" disabled={loading} style={{
