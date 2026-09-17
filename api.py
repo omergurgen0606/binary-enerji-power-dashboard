@@ -2696,7 +2696,10 @@ def trigger_ota(device_id: str, user: str = Depends(require_auth)):
         connected_evt.wait(timeout=5)
         # QoS 1 + onay bekleme: QoS 0 "gonder ve unut" demekti, broker mesaji
         # aldigini bile teyit etmiyordu.
-        info = client.publish(f"{MQTT_TOPIC_PREFIX}/{device_id}/ota", payload, qos=1)
+        # Önek cihaz tipine göre: röle "relay/" dinliyor. Sabit "powermeter/"
+        # ile yayınlarsak mesaj kimsenin dinlemediği bir konuya gider ve panel
+        # "tetiklendi" derken cihaz hiçbir şey indirmez.
+        info = client.publish(f"{cihaz_topic_oneki(device_id)}/{device_id}/ota", payload, qos=1)
         info.wait_for_publish(timeout=5)
         client.loop_stop()
         client.disconnect()

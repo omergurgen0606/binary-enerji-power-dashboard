@@ -5249,16 +5249,27 @@ function RelayToplam({ snapshots }) {
   );
 }
 
+// [başlık, kök, ekler, ondalık, birim, negatifOlabilir]
 const TEPE_GRUPLARI = [
-  ['Gerilim (L-N)', 'v_ln', ['1', '2', '3'], 1, 'V'],
-  ['Gerilim (L-L)', 'v_ll', ['12', '23', '31'], 1, 'V'],
-  ['Akım', 'i', ['1', '2', '3'], 0, 'A'],
-  ['Aktif Güç', 'p', ['1', '2', '3'], 0, 'W'],
-  ['Reaktif Güç', 'q', ['1', '2', '3'], 0, 'VAr'],
-  ['Görünür Güç', 's', ['1', '2', '3'], 0, 'VA'],
-  ['THDV', 'thdv', ['1', '2', '3'], 1, '%'],
-  ['THDI', 'thdi', ['1', '2', '3'], 1, '%'],
+  ['Gerilim (L-N)', 'v_ln', ['1', '2', '3'], 1, 'V', false],
+  ['Gerilim (L-L)', 'v_ll', ['12', '23', '31'], 1, 'V', false],
+  ['Akım', 'i', ['1', '2', '3'], 0, 'A', false],
+  ['Aktif Güç', 'p', ['1', '2', '3'], 0, 'W', true],
+  ['Reaktif Güç', 'q', ['1', '2', '3'], 0, 'VAr', true],
+  ['Görünür Güç', 's', ['1', '2', '3'], 0, 'VA', false],
+  ['THDV', 'thdv', ['1', '2', '3'], 1, '%', false],
+  ['THDI', 'thdi', ['1', '2', '3'], 1, '%', false],
 ];
+
+/** Cihaz, henüz tepe kaydı yokken sayaçları "boş" işaretçilerle döndürüyor:
+ *  min tarafı INT32_MAX, max tarafı INT32_MIN, bazı alanlarda -1. Bunları ham
+ *  göstermek panelde "-2147483648 A" gibi bir değer demek olurdu -- kullanıcı
+ *  bunu ölçüm sanır. Henüz veri yoksa "—" daha dürüst. */
+function tepeFmt(v, basamak, negatifOlabilir) {
+  if (v == null || Math.abs(v) >= 2e9) return '—';
+  if (!negatifOlabilir && v < 0) return '—';
+  return fmt(v, basamak);
+}
 
 function RelayTepe({ snapshots }) {
   const [yon, setYon] = useState('tuketim');
@@ -5279,7 +5290,7 @@ function RelayTepe({ snapshots }) {
               </tr>
             </thead>
             <tbody>
-              {TEPE_GRUPLARI.flatMap(([baslik, kok, ekler, basamak, birim]) =>
+              {TEPE_GRUPLARI.flatMap(([baslik, kok, ekler, basamak, birim, negatifOlabilir]) =>
                 ekler.map((ek, idx) => (
                   <tr key={`${kok}-${ek}`}>
                     <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', color: idx === 0 ? 'var(--ink)' : 'var(--muted)' }}>
@@ -5287,10 +5298,10 @@ function RelayTepe({ snapshots }) {
                     </td>
                     <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{ek}</td>
                     <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
-                      {fmt(d[`${kok}_min_${ek}`], basamak)} {birim}
+                      {tepeFmt(d[`${kok}_min_${ek}`], basamak, negatifOlabilir)} {birim}
                     </td>
                     <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
-                      {fmt(d[`${kok}_max_${ek}`], basamak)} {birim}
+                      {tepeFmt(d[`${kok}_max_${ek}`], basamak, negatifOlabilir)} {birim}
                     </td>
                   </tr>
                 ))
@@ -5298,14 +5309,14 @@ function RelayTepe({ snapshots }) {
               <tr>
                 <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Frekans</td>
                 <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>—</td>
-                <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{fmt(d.f_min, 2)} Hz</td>
-                <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{fmt(d.f_max, 2)} Hz</td>
+                <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{tepeFmt(d.f_min, 2, false)} Hz</td>
+                <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{tepeFmt(d.f_max, 2, false)} Hz</td>
               </tr>
               <tr>
                 <td style={{ padding: '6px 8px' }}>Dengesizlik (V / I)</td>
                 <td style={{ padding: '6px 8px' }}>—</td>
-                <td className="mono" style={{ padding: '6px 8px' }}>{fmt(d.v_dengesizlik_min, 1)} / {fmt(d.i_dengesizlik_min, 1)} %</td>
-                <td className="mono" style={{ padding: '6px 8px' }}>{fmt(d.v_dengesizlik_max, 1)} / {fmt(d.i_dengesizlik_max, 1)} %</td>
+                <td className="mono" style={{ padding: '6px 8px' }}>{tepeFmt(d.v_dengesizlik_min, 1, false)} / {tepeFmt(d.i_dengesizlik_min, 1, false)} %</td>
+                <td className="mono" style={{ padding: '6px 8px' }}>{tepeFmt(d.v_dengesizlik_max, 1, false)} / {tepeFmt(d.i_dengesizlik_max, 1, false)} %</td>
               </tr>
             </tbody>
           </table>
