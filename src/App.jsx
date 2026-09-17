@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { LineChart, Line, BarChart, Bar, ComposedChart, ReferenceLine, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import './index.css';
@@ -4999,6 +4999,587 @@ function PhasorDiagram({ latest, energy, firmware }) {
   );
 }
 
+// ======================= GA1202 Reaktif Güç Kontrol Rölesi =======================
+//
+// Röle, güç analizörüyle AYNI ölçüm çekirdeğini paylaşıyor (V/I/P/Q/S/F) --
+// o yüzden "Canlı" sekmesi olduğu gibi çalışıyor. Buradaki bölümler rölenin
+// FARKLI olan tarafı: kompanzasyon kademeleri, SVC, ve cihazın ~105 ayarı.
+
+const RELAY_PREFIX = 'ga1202';
+const isRelayDevice = (deviceId) => (deviceId || '').startsWith(`${RELAY_PREFIX}-`);
+
+/** Röle kategorilerini çeker; WebSocket'ten canlı güncelleme de alır. */
+function useRelayData(token, deviceId) {
+  const [snapshots, setSnapshots] = useState({});
+  const [tanimlar, setTanimlar] = useState(null);
+  const [yukleniyor, setYukleniyor] = useState(true);
+
+  const yenile = useCallback(async () => {
+    const headers = { Authorization: `Bearer ${token}` };
+    try {
+      const res = await axios.get(`${API_BASE}/relay/snapshots?device_id=${encodeURIComponent(deviceId)}`, { headers });
+      setSnapshots(res.data || {});
+    } catch {
+      /* erişim/ağ hatası: kartlar "veri bekleniyor" gösterir */
+    } finally {
+      setYukleniyor(false);
+    }
+  }, [token, deviceId]);
+
+  useEffect(() => {
+    yenile();
+    // Parametreler 5 dakikada bir, tepe değerleri dakikada bir yayınlanıyor;
+    // 20 saniyelik yoklama ikisini de makul sürede yakalar. WebSocket push'u
+    // zaten anlık geliyor, bu yalnızca emniyet ağı (sayfa arkada kalıp
+    // soket düşerse kartlar yine de tazelenir).
+    const t = setInterval(yenile, 20000);
+    return () => clearInterval(t);
+  }, [yenile]);
+
+  useEffect(() => {
+    const headers = { Authorization: `Bearer ${token}` };
+    axios.get(`${API_BASE}/relay/tanimlar`, { headers })
+      .then((r) => setTanimlar(r.data))
+      .catch(() => setTanimlar(null));
+  }, [token]);
+
+  // Backend her yeni kategori mesajında WebSocket'e de itiyor.
+  useEffect(() => {
+    const ws = new WebSocket(`${WS_URL}?token=${token}&device_id=${encodeURIComponent(deviceId)}`);
+    ws.onmessage = (event) => {
+      const mesaj = JSON.parse(event.data);
+      if (mesaj.type !== 'relay_snapshot') return;
+      setSnapshots((onceki) => ({
+        ...onceki,
+        [mesaj.kategori]: { data: mesaj.data, updated_at: new Date().toISOString() },
+      }));
+    };
+    return () => ws.close();
+  }, [token, deviceId]);
+
+  return { snapshots, tanimlar, yukleniyor, yenile };
+}
+
+function RelayStat({ etiket, deger, birim, vurgu }) {
+  return (
+    <div style={{
+      background: 'var(--bg)', borderRadius: 'var(--radius-sm)', padding: '10px 12px',
+      minWidth: 130, flex: '1 1 130px',
+    }}>
+      <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>{etiket}</div>
+      <div className="mono" style={{
+        fontSize: 16, fontWeight: 600, color: vurgu || 'var(--ink)',
+      }}>
+        {deger}{birim ? <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 3 }}>{birim}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function RelayVeriYok({ ne }) {
+  return (
+    <div style={{ fontSize: 13, color: 'var(--muted)' }}>
+      {ne} verisi henüz gelmedi — cihaz bu bloğu okuyup gönderdiğinde burada görünecek.
+    </div>
+  );
+}
+
+const bitAcikMi = (deger, index) => Number.isFinite(deger) && ((deger >> index) & 1) === 1;
+
+/** Kompanzasyon: rölenin asıl işi. Tek bakışta "hangi kademe devrede". */
+function RelayKompanzasyon({ snapshots, tanimlar }) {
+  const kademeler = snapshots.kademeler?.data;
+  const live = snapshots.live?.data;
+  if (!kademeler) return <SectionCard title="Kompanzasyon"><RelayVeriYok ne="Kademe" /></SectionCard>;
+
+  const durumAdi = tanimlar?.cihaz_durumlari?.[kademeler.cihaz_durumu] ?? `Bilinmiyor (${kademeler.cihaz_durumu})`;
+  const kompanzasyonda = kademeler.cihaz_durumu === 3;
+
+  // Cihaz yapılandırılmamışken bu alan anlamsız büyük değerler dönebiliyor
+  // (sahada 32786 görüldü). Listeyi ona göre çizmek yüzlerce boş kutu demek.
+  const hamSayi = kademeler.kademe_sayisi;
+  const kademeSayisi = Number.isFinite(hamSayi) && hamSayi >= 0 && hamSayi <= 32 ? hamSayi : null;
+  const detaylar = Array.isArray(kademeler.kademeler) ? kademeler.kademeler : [];
+
+  return (
+    <SectionCard
+      title="Kompanzasyon"
+      right={
+        <span style={{
+          fontSize: 12, fontWeight: 600, padding: '4px 10px', borderRadius: 999,
+          background: kompanzasyonda ? 'rgba(34,197,94,0.12)' : 'var(--bg)',
+          color: kompanzasyonda ? '#16a34a' : 'var(--muted)',
+        }}>
+          {durumAdi}
+        </span>
+      }
+    >
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+        <RelayStat etiket="Kademe Sayısı" deger={kademeSayisi ?? '—'} />
+        <RelayStat etiket="Kondansatör Gücü L1" deger={fmt(kademeler.toplam_kondansator_guc_l1, 0)} birim="VAr" />
+        <RelayStat etiket="Kondansatör Gücü L2" deger={fmt(kademeler.toplam_kondansator_guc_l2, 0)} birim="VAr" />
+        <RelayStat etiket="Kondansatör Gücü L3" deger={fmt(kademeler.toplam_kondansator_guc_l3, 0)} birim="VAr" />
+        {live && <RelayStat etiket="Hedef Cos φ (L1)" deger={fmt(live.hedef_cos_l1, 3)} />}
+      </div>
+
+      {kademeSayisi === null && (
+        <div style={{
+          fontSize: 12, color: 'var(--warn)', background: 'rgba(245,158,11,0.10)',
+          borderRadius: 'var(--radius-sm)', padding: '8px 10px', marginBottom: 14,
+        }}>
+          Cihaz kademe sayısı olarak beklenmeyen bir değer bildiriyor ({String(hamSayi)}).
+          Kademeler büyük olasılıkla henüz tanıtılmamış — “Ayarlar” sekmesindeki
+          “Kademe Tanıma Başlat” komutuyla tanıtabilirsiniz.
+        </div>
+      )}
+
+      {kademeSayisi > 0 && (
+        <>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Kademe durumları</div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+            {Array.from({ length: kademeSayisi }, (_, i) => {
+              const acik = bitAcikMi(kademeler.kademe_durumlari, i);
+              const hatali = bitAcikMi(kademeler.hatali_kademe_durumu, i);
+              const iptal = bitAcikMi(kademeler.kademe_iptal_durumu, i);
+              const renk = hatali ? 'var(--danger)' : iptal ? 'var(--warn)' : acik ? '#22c55e' : 'var(--border)';
+              const baslik = hatali ? 'Arızalı' : iptal ? 'İptal' : acik ? 'Devrede' : 'Devre dışı';
+              return (
+                <div key={i} title={`Kademe ${i + 1}: ${baslik}`} style={{
+                  width: 42, height: 42, borderRadius: 'var(--radius-sm)',
+                  border: `2px solid ${renk}`,
+                  background: acik && !hatali && !iptal ? 'rgba(34,197,94,0.12)' : 'transparent',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: 13, fontWeight: 600, color: renk === 'var(--border)' ? 'var(--muted)' : renk,
+                }}>
+                  {i + 1}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
+
+      {detaylar.length > 0 && (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
+                {['Kademe', 'Güç L1', 'Güç L2', 'Güç L3', 'Çalışma', 'Anahtarlama'].map((h) => (
+                  <th key={h} style={{ padding: '6px 8px', fontWeight: 500, borderBottom: '1px solid var(--border)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {detaylar.map((k, i) => (
+                <tr key={i}>
+                  <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{i + 1}</td>
+                  <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{fmt(k.guc_l1, 0)}</td>
+                  <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{fmt(k.guc_l2, 0)}</td>
+                  <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{fmt(k.guc_l3, 0)}</td>
+                  <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{formatDuration((k.calisma_suresi || 0) * 1000)}</td>
+                  <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{k.anahtarlama_sayisi ?? '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+/** Cihazın kendi sağlığı: sıcaklık, pil, besleme, SVC, jeneratör. */
+function RelayCihazDurumu({ snapshots }) {
+  const live = snapshots.live?.data;
+  if (!live) return null;
+  return (
+    <SectionCard title="Röle Durumu">
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <RelayStat etiket="Sıcaklık" deger={fmt(live.sicaklik, 1)} birim="°C"
+          vurgu={live.sicaklik > 70 ? 'var(--danger)' : undefined} />
+        <RelayStat etiket="Pil Gerilimi" deger={fmt(live.pil_gerilimi, 3)} birim="V"
+          vurgu={live.pil_gerilimi < 2.5 ? 'var(--warn)' : undefined} />
+        <RelayStat etiket="İç Besleme" deger={fmt(live.cihaz_ic_besleme, 0)} birim="mV" />
+        <RelayStat etiket="SVC Durumu" deger={live.svc_durum ?? '—'} />
+        <RelayStat etiket="Jeneratör" deger={live.jenerator_durumu === 1 ? 'Devrede' : live.jenerator_durumu === 0 ? 'Devre dışı' : '—'} />
+      </div>
+    </SectionCard>
+  );
+}
+
+const TOPLAM_SATIRLARI = [
+  ['Toplam Aktif Güç', 'p_toplam', 0, 'W'],
+  ['Toplam Reaktif Güç', 'q_toplam', 0, 'VAr'],
+  ['Toplam Endüktif Güç', 'ql_toplam', 0, 'VAr'],
+  ['Toplam Kapasitif Güç', 'qc_toplam', 0, 'VAr'],
+  ['Toplam Görünür Güç', 's_toplam', 0, 'VA'],
+  ['Ortalama Akım', 'i_ort', 0, 'A'],
+  ['Ortalama Aktif Güç', 'p_ort', 0, 'W'],
+  ['Ortalama Cos φ', 'cos_ort', 3, ''],
+  ['Ortalama Tan φ', 'tan_ort', 3, ''],
+  ['Ortalama PF', 'pf_ort', 3, ''],
+];
+
+function RelayToplam({ snapshots }) {
+  const [yon, setYon] = useState('tuketim');
+  const d = snapshots.toplam?.data;
+  return (
+    <SectionCard
+      title="Toplam ve Ortalama Değerler"
+      right={<TabToggle options={[['tuketim', 'Tüketim'], ['uretim', 'Üretim']]} value={yon} onChange={setYon} />}
+    >
+      {!d ? <RelayVeriYok ne="Toplam/ortalama" /> : (
+        <>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+            {TOPLAM_SATIRLARI.map(([etiket, anahtar, basamak, birim]) => (
+              <RelayStat key={anahtar} etiket={etiket} deger={fmt(d[`${anahtar}_${yon}`], basamak)} birim={birim} />
+            ))}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>Yöne bağlı olmayanlar</div>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <RelayStat etiket="Ortalama Gerilim (L-N)" deger={fmt(d.v_ort_ln, 1)} birim="V" />
+            <RelayStat etiket="Ortalama Gerilim (L-L)" deger={fmt(d.v_ort_ll, 1)} birim="V" />
+            <RelayStat etiket="Ortalama Frekans" deger={fmt(d.f_ort, 2)} birim="Hz" />
+            <RelayStat etiket="Ortalama THDI" deger={fmt(d.thdi_ort, 1)} birim="%" />
+            <RelayStat etiket="Ortalama THDV" deger={fmt(d.thdv_ort, 1)} birim="%" />
+          </div>
+        </>
+      )}
+    </SectionCard>
+  );
+}
+
+const TEPE_GRUPLARI = [
+  ['Gerilim (L-N)', 'v_ln', ['1', '2', '3'], 1, 'V'],
+  ['Gerilim (L-L)', 'v_ll', ['12', '23', '31'], 1, 'V'],
+  ['Akım', 'i', ['1', '2', '3'], 0, 'A'],
+  ['Aktif Güç', 'p', ['1', '2', '3'], 0, 'W'],
+  ['Reaktif Güç', 'q', ['1', '2', '3'], 0, 'VAr'],
+  ['Görünür Güç', 's', ['1', '2', '3'], 0, 'VA'],
+  ['THDV', 'thdv', ['1', '2', '3'], 1, '%'],
+  ['THDI', 'thdi', ['1', '2', '3'], 1, '%'],
+];
+
+function RelayTepe({ snapshots }) {
+  const [yon, setYon] = useState('tuketim');
+  const d = snapshots[`tepe_${yon}`]?.data;
+  return (
+    <SectionCard
+      title="Tepe Değerleri (Min / Max)"
+      right={<TabToggle options={[['tuketim', 'Tüketim'], ['uretim', 'Üretim']]} value={yon} onChange={setYon} />}
+    >
+      {!d ? <RelayVeriYok ne="Tepe değeri" /> : (
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ color: 'var(--muted)', textAlign: 'left' }}>
+                {['Büyüklük', 'Faz', 'Min', 'Max'].map((h) => (
+                  <th key={h} style={{ padding: '6px 8px', fontWeight: 500, borderBottom: '1px solid var(--border)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {TEPE_GRUPLARI.flatMap(([baslik, kok, ekler, basamak, birim]) =>
+                ekler.map((ek, idx) => (
+                  <tr key={`${kok}-${ek}`}>
+                    <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)', color: idx === 0 ? 'var(--ink)' : 'var(--muted)' }}>
+                      {idx === 0 ? baslik : ''}
+                    </td>
+                    <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{ek}</td>
+                    <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
+                      {fmt(d[`${kok}_min_${ek}`], basamak)} {birim}
+                    </td>
+                    <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>
+                      {fmt(d[`${kok}_max_${ek}`], basamak)} {birim}
+                    </td>
+                  </tr>
+                ))
+              )}
+              <tr>
+                <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>Frekans</td>
+                <td style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>—</td>
+                <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{fmt(d.f_min, 2)} Hz</td>
+                <td className="mono" style={{ padding: '6px 8px', borderBottom: '1px solid var(--border)' }}>{fmt(d.f_max, 2)} Hz</td>
+              </tr>
+              <tr>
+                <td style={{ padding: '6px 8px' }}>Dengesizlik (V / I)</td>
+                <td style={{ padding: '6px 8px' }}>—</td>
+                <td className="mono" style={{ padding: '6px 8px' }}>{fmt(d.v_dengesizlik_min, 1)} / {fmt(d.i_dengesizlik_min, 1)} %</td>
+                <td className="mono" style={{ padding: '6px 8px' }}>{fmt(d.v_dengesizlik_max, 1)} / {fmt(d.i_dengesizlik_max, 1)} %</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+const ENERJI_SATIRLARI = [
+  ['Toplam Aktif', 'aktif_toplam', 'kWh'],
+  ['Toplam Endüktif', 'enduktif_toplam', 'kVArh'],
+  ['Toplam Kapasitif', 'kapasitif_toplam', 'kVArh'],
+  ['Aktif L1', 'aktif_l1', 'kWh'], ['Aktif L2', 'aktif_l2', 'kWh'], ['Aktif L3', 'aktif_l3', 'kWh'],
+  ['Endüktif L1', 'enduktif_l1', 'kVArh'], ['Endüktif L2', 'enduktif_l2', 'kVArh'], ['Endüktif L3', 'enduktif_l3', 'kVArh'],
+  ['Kapasitif L1', 'kapasitif_l1', 'kVArh'], ['Kapasitif L2', 'kapasitif_l2', 'kVArh'], ['Kapasitif L3', 'kapasitif_l3', 'kVArh'],
+];
+
+function RelayEnerji({ snapshots }) {
+  const [yon, setYon] = useState('tuketim');
+  const d = snapshots[`enerji_${yon}`]?.data;
+  return (
+    <SectionCard
+      title="Enerji Sayaçları"
+      right={<TabToggle options={[['tuketim', 'Tüketim'], ['uretim', 'Üretim']]} value={yon} onChange={setYon} />}
+    >
+      {!d ? <RelayVeriYok ne="Enerji" /> : (
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {ENERJI_SATIRLARI.map(([etiket, anahtar, birim]) => (
+            <RelayStat key={anahtar} etiket={etiket} deger={fmt(d[anahtar], 0)} birim={birim} />
+          ))}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+/** Ayarlar: ~105 parametre, gruplanmış; yazılabilir olanlar düzenlenebilir. */
+function RelayAyarlar({ token, deviceId, snapshots, tanimlar, onYenile }) {
+  const [duzenlenen, setDuzenlenen] = useState(null); // anahtar
+  const [taslak, setTaslak] = useState('');
+  const [mesaj, setMesaj] = useState(null);
+  const [kaydediliyor, setKaydediliyor] = useState(false);
+  const degerler = snapshots.parametreler?.data;
+
+  if (!tanimlar) return <SectionCard title="Ayarlar"><RelayVeriYok ne="Tanım" /></SectionCard>;
+
+  const gruplar = [...new Set(tanimlar.parametreler.map((p) => p.grup))];
+
+  async function kaydet(p) {
+    const sayi = Number(taslak);
+    if (!Number.isFinite(sayi)) return setMesaj({ hata: true, metin: 'Geçerli bir sayı girin' });
+    setKaydediliyor(true);
+    setMesaj(null);
+    try {
+      const res = await axios.post(`${API_BASE}/relay/parametre`,
+        { device_id: deviceId, anahtar: p.anahtar, deger: Math.round(sayi) },
+        { headers: { Authorization: `Bearer ${token}` } });
+      setMesaj({ metin: res.data.message });
+      setDuzenlenen(null);
+      // Cihaz yazmadan hemen sonra parametreleri yeniden yayınlıyor; kısa
+      // bir gecikmeyle çekmek yeni değeri yakalamaya yetiyor.
+      setTimeout(onYenile, 2500);
+    } catch (err) {
+      setMesaj({ hata: true, metin: err.response?.data?.detail || 'Gönderilemedi' });
+    } finally {
+      setKaydediliyor(false);
+    }
+  }
+
+  return (
+    <>
+      <RelayKomutlar token={token} deviceId={deviceId} tanimlar={tanimlar} />
+      {gruplar.map((grup) => (
+        <SectionCard key={grup} title={`Ayarlar — ${grup}`}>
+          {!degerler && <div style={{ marginBottom: 10 }}><RelayVeriYok ne="Parametre" /></div>}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+            {tanimlar.parametreler.filter((p) => p.grup === grup).map((p) => {
+              const ham = degerler?.[p.anahtar];
+              const etiketli = p.secenekler?.[ham];
+              const duzenlemede = duzenlenen === p.anahtar;
+              return (
+                <div key={p.anahtar} style={{
+                  background: 'var(--bg)', borderRadius: 'var(--radius-sm)', padding: '10px 12px',
+                }}>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
+                    {p.etiket}
+                    {!p.yazilabilir && <span title="Salt okunur" style={{ marginLeft: 5 }}>🔒</span>}
+                  </div>
+                  {duzenlemede ? (
+                    <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                      <input
+                        type="number"
+                        value={taslak}
+                        onChange={(e) => setTaslak(e.target.value)}
+                        autoFocus
+                        style={{ ...inputStyle, padding: '6px 8px', fontSize: 13, width: 90 }}
+                      />
+                      <button onClick={() => kaydet(p)} disabled={kaydediliyor} style={{
+                        padding: '6px 10px', borderRadius: 'var(--radius-xs)', border: 'none',
+                        background: 'var(--l3)', color: '#fff', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+                      }}>{kaydediliyor ? '…' : 'Yaz'}</button>
+                      <button onClick={() => setDuzenlenen(null)} style={{
+                        padding: '6px 8px', borderRadius: 'var(--radius-xs)', border: '1px solid var(--border)',
+                        background: 'none', color: 'var(--muted)', fontSize: 12, cursor: 'pointer',
+                      }}>✕</button>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
+                      <span className="mono" style={{ fontSize: 15, fontWeight: 600 }}>
+                        {etiketli ?? (ham ?? '—')}
+                        {!etiketli && p.birim && p.birim !== 'index' && (
+                          <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 3 }}>{p.birim}</span>
+                        )}
+                      </span>
+                      {p.yazilabilir && degerler && (
+                        <button
+                          onClick={() => { setDuzenlenen(p.anahtar); setTaslak(String(ham ?? '')); setMesaj(null); }}
+                          style={{
+                            background: 'none', border: 'none', color: 'var(--l3)', fontSize: 11,
+                            cursor: 'pointer', textDecoration: 'underline', padding: 0,
+                          }}
+                        >Değiştir</button>
+                      )}
+                    </div>
+                  )}
+                  {duzenlemede && (
+                    <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4 }}>
+                      Aralık: {p.min} – {p.max}{p.birim && p.birim !== 'index' ? ` ${p.birim}` : ''}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          {mesaj && (
+            <div style={{ marginTop: 10, fontSize: 12, color: mesaj.hata ? 'var(--danger)' : '#16a34a' }}>
+              {mesaj.metin}
+            </div>
+          )}
+        </SectionCard>
+      ))}
+    </>
+  );
+}
+
+/** Yazma komutları. Geri dönüşü olmayanlar için cihaz adı yazdırarak çift onay. */
+function RelayKomutlar({ token, deviceId, tanimlar }) {
+  const [calisan, setCalisan] = useState(null);
+  const [mesaj, setMesaj] = useState(null);
+  const [onayBekleyen, setOnayBekleyen] = useState(null);
+  const [onayMetni, setOnayMetni] = useState('');
+
+  async function calistir(komut) {
+    setCalisan(komut.anahtar);
+    setMesaj(null);
+    try {
+      const res = await axios.post(`${API_BASE}/relay/komut`,
+        { device_id: deviceId, komut: komut.anahtar },
+        { headers: { Authorization: `Bearer ${token}` } });
+      setMesaj({ metin: res.data.message });
+    } catch (err) {
+      setMesaj({ hata: true, metin: err.response?.data?.detail || 'Komut gönderilemedi' });
+    } finally {
+      setCalisan(null);
+      setOnayBekleyen(null);
+      setOnayMetni('');
+    }
+  }
+
+  const normal = tanimlar.komutlar.filter((k) => !k.tehlikeli);
+  const tehlikeli = tanimlar.komutlar.filter((k) => k.tehlikeli);
+
+  return (
+    <SectionCard title="Komutlar">
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {normal.map((k) => (
+          <button key={k.anahtar} onClick={() => calistir(k)} disabled={calisan === k.anahtar} style={{
+            padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+            background: 'var(--surface)', color: 'var(--ink)', fontSize: 12, fontWeight: 600,
+            cursor: calisan ? 'default' : 'pointer',
+          }}>
+            {calisan === k.anahtar ? 'Gönderiliyor…' : k.etiket}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 18, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 11, color: 'var(--danger)', fontWeight: 600, marginBottom: 8 }}>
+          Geri alınamaz işlemler
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {tehlikeli.map((k) => (
+            <button key={k.anahtar} onClick={() => { setOnayBekleyen(k); setOnayMetni(''); setMesaj(null); }} style={{
+              padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--danger)',
+              background: 'none', color: 'var(--danger)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            }}>
+              {k.etiket}
+            </button>
+          ))}
+        </div>
+        {onayBekleyen && (
+          <div style={{
+            marginTop: 12, padding: 12, borderRadius: 'var(--radius-sm)',
+            background: 'rgba(239,68,68,0.08)', border: '1px solid var(--danger)',
+          }}>
+            <div style={{ fontSize: 13, marginBottom: 8 }}>
+              <strong>{onayBekleyen.etiket}</strong> — bu işlem geri alınamaz ve cihazın
+              çalışmasını kesintiye uğratabilir. Onaylamak için cihaz ID’sini yazın:
+              <span className="mono" style={{ marginLeft: 4 }}>{deviceId}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                value={onayMetni}
+                onChange={(e) => setOnayMetni(e.target.value)}
+                placeholder={deviceId}
+                style={{ ...inputStyle, padding: '7px 9px', fontSize: 13, maxWidth: 220 }}
+              />
+              <button
+                onClick={() => calistir(onayBekleyen)}
+                disabled={onayMetni.trim() !== deviceId || calisan}
+                style={{
+                  padding: '7px 12px', borderRadius: 'var(--radius-sm)', border: 'none',
+                  background: onayMetni.trim() === deviceId ? 'var(--danger)' : 'var(--border)',
+                  color: '#fff', fontSize: 12, fontWeight: 600,
+                  cursor: onayMetni.trim() === deviceId ? 'pointer' : 'default',
+                }}
+              >Onayla ve Çalıştır</button>
+              <button onClick={() => setOnayBekleyen(null)} style={{
+                padding: '7px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
+                background: 'none', color: 'var(--muted)', fontSize: 12, cursor: 'pointer',
+              }}>Vazgeç</button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {mesaj && (
+        <div style={{ marginTop: 12, fontSize: 12, color: mesaj.hata ? 'var(--danger)' : '#16a34a' }}>
+          {mesaj.metin}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function RelayBolumleri({ token, deviceId, tab }) {
+  const { snapshots, tanimlar, yenile } = useRelayData(token, deviceId);
+  if (tab === 'kompanzasyon') {
+    return (
+      <>
+        <RelayKompanzasyon snapshots={snapshots} tanimlar={tanimlar} />
+        <RelayCihazDurumu snapshots={snapshots} />
+        <RelayToplam snapshots={snapshots} />
+      </>
+    );
+  }
+  if (tab === 'olcum') {
+    return (
+      <>
+        <RelayTepe snapshots={snapshots} />
+        <RelayEnerji snapshots={snapshots} />
+      </>
+    );
+  }
+  if (tab === 'ayarlar') {
+    return (
+      <RelayAyarlar token={token} deviceId={deviceId} snapshots={snapshots}
+        tanimlar={tanimlar} onYenile={yenile} />
+    );
+  }
+  return null;
+}
+
 const DASHBOARD_TABS = [
   { key: 'canli', label: 'Canlı' },
   { key: 'fatura', label: 'Fatura' },
@@ -5007,10 +5588,22 @@ const DASHBOARD_TABS = [
   { key: 'cihaz', label: 'Cihaz' },
 ];
 
-function DashboardTabs({ active, onChange, alarmCount }) {
+// Röle farklı bir ürün: fatura/analiz sekmeleri onun verisine dayanmıyor,
+// yerine kompanzasyona özel sekmeler geliyor. "Canlı" ortak çünkü ölçüm
+// çekirdeği aynı.
+const RELAY_DASHBOARD_TABS = [
+  { key: 'canli', label: 'Canlı' },
+  { key: 'kompanzasyon', label: 'Kompanzasyon' },
+  { key: 'olcum', label: 'Tepe & Enerji' },
+  { key: 'ayarlar', label: 'Ayarlar' },
+  { key: 'alarm', label: 'Alarmlar' },
+  { key: 'cihaz', label: 'Cihaz' },
+];
+
+function DashboardTabs({ active, onChange, alarmCount, relay }) {
   return (
     <nav className="dash-tabs">
-      {DASHBOARD_TABS.map((t) => (
+      {(relay ? RELAY_DASHBOARD_TABS : DASHBOARD_TABS).map((t) => (
         <button
           key={t.key}
           className="dash-tab"
@@ -5222,7 +5815,11 @@ function DeviceDashboard({ token, device, tab, onTabChange, onBack, onLogout, th
 
       <SubscriptionBanner subscription={subscription} />
 
-      <DashboardTabs active={tab} onChange={selectTab} alarmCount={alarmCount} />
+      <DashboardTabs active={tab} onChange={selectTab} alarmCount={alarmCount} relay={isRelayDevice(device.device_id)} />
+
+      {isRelayDevice(device.device_id) && (
+        <RelayBolumleri token={token} deviceId={device.device_id} tab={tab} />
+      )}
 
       {tab === 'canli' && (
         <>
@@ -5650,7 +6247,11 @@ function parseRoute(pathname) {
     return {
       ad: 'cihaz',
       deviceId: decodeURIComponent(eslesme[1]),
-      sekme: eslesme[2] && DASHBOARD_TABS.some((t) => t.key === eslesme[2]) ? eslesme[2] : 'canli',
+      // Röle sekmeleri (kompanzasyon/olcum/ayarlar) de geçerli: cihaz tipine
+      // göre ayrı iki liste var, URL doğrulaması ikisini birden kabul etmeli --
+      // yoksa röle sekmesine tıklamak sessizce "canli"ye geri düşüyor.
+      sekme: eslesme[2] && [...DASHBOARD_TABS, ...RELAY_DASHBOARD_TABS].some((t) => t.key === eslesme[2])
+        ? eslesme[2] : 'canli',
     };
   }
   // Bilinmeyen yollar ve kok yol ortak girise duser.

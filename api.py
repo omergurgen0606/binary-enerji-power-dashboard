@@ -173,6 +173,37 @@ MQTT_HARMONICS_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/harmonics/+"
 MQTT_INFO_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/info"
 MQTT_WIFI_WILDCARD = f"{MQTT_TOPIC_PREFIX}/+/wifi"
 
+# GA1202 (reaktif güç kontrol rölesi) "powermeter/" değil "relay/" önekini
+# kullanıyor (bkz. ESP32-GA1202/README.md) çünkü ürün kategorisi farklı --
+# ama on_message() zaten önekten bağımsız çalışıyor (device_id_from_topic
+# sadece parts[1]'e bakıyor), bu yüzden aynı handle_live/handle_status/
+# handle_info generic olarak GA1202 için de çalışıyor. "Anlık Değerler"
+# bloğu (V/I/P/Q/S/F/cos/PF) ANL13/ANL21 ile birebir aynı JSON alan
+# adlarını kullandığı için measurements tablosuna sorunsuz yazılıyor;
+# THD alan adları farklı (thdv/thdi vs thd/thvd) olduğu için o iki sütun
+# GA1202 için boş kalıyor -- zararsız. Kademeler (kompanzasyon-özel veri)
+# için henüz ayrı bir tablo/handler yok, o topic'e hiç abone olunmuyor,
+# sonraki fazda eklenecek.
+MQTT_RELAY_LIVE_WILDCARD = "relay/+/live"
+MQTT_RELAY_STATUS_WILDCARD = "relay/+/status"
+MQTT_RELAY_INFO_WILDCARD = "relay/+/info"
+# Röleye özel kategoriler -- relay_snapshots tablosuna (kategori, jsonb) olarak
+# yazılıyor. tepe/enerji dört parçalı (.../tepe/tuketim) çünkü tüketim ve üretim
+# blokları cihazda ayrı register aralıkları.
+MQTT_RELAY_KADEMELER_WILDCARD = "relay/+/kademeler"
+MQTT_RELAY_TOPLAM_WILDCARD = "relay/+/toplam"
+MQTT_RELAY_TEPE_WILDCARD = "relay/+/tepe/+"
+MQTT_RELAY_ENERJI_WILDCARD = "relay/+/enerji/+"
+MQTT_RELAY_PARAM_WILDCARD = "relay/+/parametreler"
+
+# GA1202 gibi röle tipi cihazlar "relay/" önekini kullanıyor; komut yazarken
+# doğru öneki seçmek zorundayız, yoksa cihaz dinlemediği bir konuya yazarız
+# (sessizce hiçbir şey olmaz -- teşhis etmesi zor bir hata).
+RELAY_DEVICE_TYPES = {"ga1202"}
+
+def cihaz_topic_oneki(device_id: str) -> str:
+    return "relay" if device_type_from_id(device_id) in RELAY_DEVICE_TYPES else MQTT_TOPIC_PREFIX
+
 def live_topic(device_id: str) -> str:
     return f"{MQTT_TOPIC_PREFIX}/{device_id}/live"
 
@@ -183,7 +214,8 @@ def status_topic(device_id: str) -> str:
     return f"{MQTT_TOPIC_PREFIX}/{device_id}/status"
 
 def cmd_topic(device_id: str) -> str:
-    return f"{MQTT_TOPIC_PREFIX}/{device_id}/cmd"
+    # Röle tipi cihazlar "relay/" önekini dinliyor (bkz. cihaz_topic_oneki).
+    return f"{cihaz_topic_oneki(device_id)}/{device_id}/cmd"
 
 def device_id_from_topic(topic: str) -> str | None:
     parts = topic.split("/")
@@ -640,6 +672,8 @@ CIHAZ_VERI_TABLOLARI = (
     "device_mqtt_credentials",
     "alarm_events",
     "alarm_rules",
+    # GA1202 röle kategorileri (kademeler, parametreler, tepe, enerji...).
+    "relay_snapshots",
 )
 
 # Ham satırları silmek sürekli toplamaları GÜNCELLEMEZ (TimescaleDB). Bu adım
@@ -1770,6 +1804,303 @@ def get_subscription(user: str = Depends(require_auth)):
         cur.close()
         conn.close()
     return state
+
+
+# ---------- GA1202 reaktif güç kontrol rölesi ----------
+#
+# Rölenin parametre (ayar) register'ları. Kaynak: Grup Arge RKRS Modbus tablosu
+# "Parametre" sayfaları (adres 200-429, hepsi Uint16, tek register).
+#
+# Bu tablo BURADA da duruyor çünkü üç işi birden yapıyor:
+#   1. Yazma doğrulaması -- panelden gelen değer min/max dışındaysa cihaza hiç
+#      gitmiyor. Cihaza aralık dışı değer yazmak, ayarı sessizce bozup
+#      kompanzasyonun yanlış çalışmasına yol açabilir.
+#   2. Salt-okunur alanların yazılmasını engelleme (R olanlar).
+#   3. Panelin (web/iOS/Android) etiket, birim ve aralıkları TEK kaynaktan
+#      alması -- üç istemcide üç ayrı kopya tutmak, haritada bir düzeltme
+#      olduğunda üçünü birden güncellemeyi gerektirirdi.
+#
+# (etiket, register, birim, min, max, yazilabilir, grup)
+RELAY_PARAM_TANIMLARI = [
+    # --- Kimlik / durum (salt okunur) ---
+    ("parametre_versiyonu", "Parametre Versiyonu", 200, "", 0, 255, False, "Sistem"),
+    ("calisma_suresi", "Çalışma Süresi", 201, "", 0, 32767, False, "Sistem"),
+    ("reset_durumu", "Reset Durumu", 202, "", 0, 1, False, "Sistem"),
+    ("power_down_counter", "Power Down Sayacı", 203, "", 0, 32767, False, "Sistem"),
+    # --- Modbus / haberleşme ---
+    ("modbus_adresi", "Modbus Adresi", 206, "", 1, 247, True, "Haberleşme"),
+    ("modbus_hizi", "Modbus Hızı", 210, "index", 0, 5, True, "Haberleşme"),
+    ("modbus_modu", "Modbus Modu", 425, "index", 0, 1, True, "Haberleşme"),
+    ("modbus_data_bits", "Modbus Data Bits", 426, "", 7, 8, False, "Haberleşme"),
+    ("modbus_parity", "Modbus Parity", 427, "index", 0, 2, True, "Haberleşme"),
+    ("modbus_stop_bits", "Modbus Stop Bits", 428, "", 1, 2, True, "Haberleşme"),
+    ("modbus_sessizlik_suresi", "Modbus Sessizlik Süresi", 429, "", 4, 128, True, "Haberleşme"),
+    ("modbus_akim_hassasiyeti", "Modbus Akım Hassasiyeti", 227, "", 1, 1000, True, "Haberleşme"),
+    ("okuma_koruma_biti", "Okuma Koruma Biti", 214, "", 0, 1, False, "Haberleşme"),
+    ("yazma_koruma_biti", "Yazma Koruma Biti", 215, "", 0, 1, False, "Haberleşme"),
+    ("okuma_sifresi_onay", "Okuma Şifresi Onay", 216, "", 0, 4, True, "Haberleşme"),
+    ("yazma_sifresi_onay", "Yazma Şifresi Onay", 217, "", 0, 4, True, "Haberleşme"),
+    # --- Ölçüm / trafo ---
+    ("akim_trafo_orani", "Akım Trafo Oranı", 221, "index", 0, 69, True, "Ölçüm"),
+    ("hat_voltaji", "Hat Voltajı", 222, "index", 0, 49, True, "Ölçüm"),
+    ("olcum_voltaji", "Ölçüm Voltajı", 223, "index", 0, 23, True, "Ölçüm"),
+    ("demand_periyodu", "Demand Periyodu", 226, "dk", 1, 60, True, "Ölçüm"),
+    ("enerji_periyodu", "Enerji Periyodu", 228, "ms", 100, 1000, True, "Ölçüm"),
+    ("ozel_ct_orani_l1", "Özel Akım Trafo Oranı L1", 350, "", 0, 2000, False, "Ölçüm"),
+    ("ozel_ct_orani_l2", "Özel Akım Trafo Oranı L2", 351, "", 0, 2000, False, "Ölçüm"),
+    ("ozel_ct_orani_l3", "Özel Akım Trafo Oranı L3", 352, "", 0, 2000, False, "Ölçüm"),
+    ("akim_yonu_eslesme", "Akım Yönü / Gerilim Eşleşme", 356, "index", 0, 65535, False, "Ölçüm"),
+    ("harmonik_profili", "Harmonik Profili", 265, "index", 0, 9, True, "Ölçüm"),
+    ("harmonik_limiti", "Harmonik Limiti", 266, "", 7, 63, True, "Ölçüm"),
+    ("harmonik_analizi", "Harmonik Analizi", 267, "index", 0, 2, True, "Ölçüm"),
+    # --- Kompanzasyon (asıl iş) ---
+    ("enduktif_limit", "Endüktif Limit", 357, "", 1, 50, True, "Kompanzasyon"),
+    ("kapasitif_limit", "Kapasitif Limit", 358, "", 1, 50, True, "Kompanzasyon"),
+    ("histerisis_enduktif", "Histerezis (Endüktif)", 359, "", 5, 50, True, "Kompanzasyon"),
+    ("histerisis_kapasitif", "Histerezis (Kapasitif)", 360, "", 5, 50, True, "Kompanzasyon"),
+    ("histerisis_normal", "Histerezis (Normal)", 361, "", 3, 50, True, "Kompanzasyon"),
+    ("enduktif_cevap_suresi", "Endüktifte Cevap Süresi", 362, "×100 ms", 2, 250, True, "Kompanzasyon"),
+    ("kapasitif_cevap_suresi", "Kapasitifte Cevap Süresi", 363, "×100 ms", 2, 250, True, "Kompanzasyon"),
+    ("normal_cevap_suresi", "Normalde Cevap Süresi", 364, "sn", 2, 255, True, "Kompanzasyon"),
+    ("hedef_cos_hat", "Hedef Cos (Hat)", 366, "index", -36, 36, True, "Kompanzasyon"),
+    ("hedef_cos_jenerator", "Hedef Cos (Jeneratör)", 367, "index", -36, 36, True, "Kompanzasyon"),
+    ("ek_guc_suresi", "Ek Güç Süresi", 368, "saat", 0, 720, True, "Kompanzasyon"),
+    ("ek_reaktif_guc_3faz", "Ek Reaktif Güç (3 Faz)", 369, "×100 VAr", -500, 500, True, "Kompanzasyon"),
+    ("ek_reaktif_guc_l1", "Ek Reaktif Güç L1", 370, "VAr", -20000, 20000, True, "Kompanzasyon"),
+    ("ek_reaktif_guc_l2", "Ek Reaktif Güç L2", 371, "VAr", -20000, 20000, True, "Kompanzasyon"),
+    ("ek_reaktif_guc_l3", "Ek Reaktif Güç L3", 372, "VAr", -20000, 20000, True, "Kompanzasyon"),
+    ("jenerator", "Jeneratör", 353, "index", 0, 1, True, "Kompanzasyon"),
+    # --- Kademe yönetimi ---
+    ("kademe_desarj_suresi", "Kademe Deşarj Süresi", 354, "sn", 1, 60, True, "Kademeler"),
+    ("kademe_ortak_kontrol", "Kademe Ortak Kontrol", 365, "index", 0, 1, True, "Kademeler"),
+    ("kademe_ara_suresi", "Kademe Ara Süresi", 403, "", 100, 30000, True, "Kademeler"),
+    ("kademeler_daimi_kontrol", "Kademeler Daimi Kontrol", 404, "index", 0, 1, True, "Kademeler"),
+    ("kademe_faz_hatasi", "Kademe Faz Hatası", 406, "%", 5, 30, True, "Kademeler"),
+    ("kademe_deger_kaybi", "Kademe Değer Kaybı", 407, "%", 5, 40, True, "Kademeler"),
+    ("olcme_hatasi_tanima", "Ölçme Hatası (Tanıma)", 405, "%", 2, 15, True, "Kademeler"),
+    ("es_yaslandirma_kontrol", "Eş Yaşlandırma Kontrol", 400, "index", 0, 1, True, "Kademeler"),
+    ("es_yaslandirma_yuzdelik", "Eş Yaşlandırma Muadil Yüzdelik", 401, "%", 1, 10, True, "Kademeler"),
+    ("es_yaslandirma_sure", "Eş Yaşlandırma Devrede Kalma", 402, "saat", 0, 24, True, "Kademeler"),
+    ("kademe_ortak1_tipi", "Kademe Ortak-1 Tipi", 383, "index", 0, 1, True, "Kademeler"),
+    ("kademe_ortak1_olcme_gerilim", "Kademe Ortak-1 Ölçme Gerilimi", 384, "V", 0, 450, True, "Kademeler"),
+    ("kademe_ortak1_yuzdelik", "Kademe Ortak-1 Yüzdelik Fark", 385, "%", 5, 50, True, "Kademeler"),
+    ("kademe_ortak2_tipi", "Kademe Ortak-2 Tipi", 386, "index", 0, 1, True, "Kademeler"),
+    ("kademe_ortak2_olcme_gerilim", "Kademe Ortak-2 Ölçme Gerilimi", 387, "V", 0, 450, True, "Kademeler"),
+    ("kademe_ortak2_yuzdelik", "Kademe Ortak-2 Yüzdelik Fark", 388, "%", 5, 50, True, "Kademeler"),
+    ("kademe_ortak3_tipi", "Kademe Ortak-3 Tipi", 389, "index", 0, 1, True, "Kademeler"),
+    ("kademe_ortak3_olcme_gerilim", "Kademe Ortak-3 Ölçme Gerilimi", 390, "V", 0, 450, True, "Kademeler"),
+    ("kademe_ortak3_yuzdelik", "Kademe Ortak-3 Yüzdelik Fark", 391, "%", 5, 50, True, "Kademeler"),
+    ("faz_faz_kontrolu", "Faz-Faz Kontrolü", 394, "index", 0, 1, True, "Kademeler"),
+    ("akim_gerilim_eslestirme", "Akım-Gerilim Eşleştirme Kontrolü", 395, "index", 0, 1, True, "Kademeler"),
+    # --- SVC (statik VAr kompanzatör) ---
+    ("aktif_svc_orani", "Aktif SVC Oranı", 378, "", 5, 100, True, "SVC"),
+    ("normal_svc_yuzdesi", "Normalde SVC Yüzdesi", 379, "%", 10, 80, True, "SVC"),
+    ("reaktif_svc_yuzdesi", "Reaktifte SVC Yüzdesi", 380, "%", 30, 100, True, "SVC"),
+    ("termik_kontrol", "Termik Kontrol", 381, "index", 0, 1, True, "SVC"),
+    # --- Korumalar ---
+    ("asiri_gerilim_koruma", "Aşırı Gerilim Koruma", 341, "index", 0, 1, True, "Korumalar"),
+    ("dusuk_gerilim_koruma", "Düşük Gerilim Koruma", 342, "index", 0, 1, True, "Korumalar"),
+    ("asiri_harmonik_koruma", "Aşırı Harmonik Koruma", 343, "index", 0, 1, True, "Korumalar"),
+    ("asiri_sicaklik_koruma", "Aşırı Sıcaklık Koruma", 344, "index", 0, 1, True, "Korumalar"),
+    ("dusuk_gerilim_degeri", "Düşük Gerilim Değeri", 345, "V", 50, 1000, True, "Korumalar"),
+    ("asiri_harmonik_degeri", "Aşırı Harmonik Değeri", 347, "%", 2, 50, True, "Korumalar"),
+    ("asiri_sicaklik_degeri", "Aşırı Sıcaklık Değeri", 348, "°C", 40, 90, True, "Korumalar"),
+    # --- Kurulum ---
+    ("kurulum_modu", "Kurulum Modu", 410, "index", 0, 2, True, "Kurulum"),
+    ("kurulum_tekrar_sayisi", "Kurulum Tekrar Sayısı", 411, "", 1, 5, True, "Kurulum"),
+    ("baglanti_sekli", "Bağlantı Şekli", 412, "index", 0, 3, True, "Kurulum"),
+    ("kurulum_daimi_kontrol", "Kurulum Daimi Kontrol", 413, "index", 0, 1, True, "Kurulum"),
+    ("olcme_hatasi_kurulum", "Ölçme Hatası (Kurulum)", 414, "%", 5, 30, True, "Kurulum"),
+    # --- RGP (reaktif güç profili) ---
+    ("rgp_guc_cozunurlugu", "RGP Güç Çözünürlüğü", 316, "×100 VAr", 1, 40, True, "RGP"),
+    ("rgp_maksimum_fark", "RGP Maksimum Fark", 317, "%", 20, 40, True, "RGP"),
+    ("rgp_yuzdesi", "RGP Yüzdesi", 318, "%", 5, 40, True, "RGP"),
+    # --- Ekran / arayüz ---
+    ("ekran_ornek_sayisi", "Ekran Örnek Sayısı", 252, "", 1, 16, True, "Ekran"),
+    ("ekran_yuzdelik_fark", "Ekran Yüzdelik Fark", 253, "%", 1, 60, True, "Ekran"),
+    ("ekran_tazeleme_araligi", "Ekran Tazeleme Aralığı", 254, "ms", 300, 10000, True, "Ekran"),
+    ("ekran_koruyucu", "Ekran Koruyucu", 256, "index", 0, 1, True, "Ekran"),
+    ("ekran_koruyucu_bekleme", "Ekran Koruyucu Bekleme", 257, "dk", 3, 240, True, "Ekran"),
+    ("ekran_parlaklik", "Ekran Parlaklık Seviyesi", 258, "%", 5, 100, True, "Ekran"),
+    ("dil", "Dil", 260, "index", 0, 1, True, "Ekran"),
+    ("erisim_seviyesi", "Erişim Seviyesi", 261, "index", 0, 2, True, "Ekran"),
+    ("erisim_kontrol", "Erişim Kontrol", 262, "index", 0, 1, True, "Ekran"),
+    ("zaman_dilimi", "Zaman Dilimi (GMT)", 249, "saat", -12, 12, True, "Ekran"),
+    # --- Reset sayaçları (teşhis, salt okunur) ---
+    ("reset_bilinmeyen", "Reset — Bilinmeyen", 240, "", 0, 65535, False, "Teşhis"),
+    ("reset_power_on", "Reset — Power On", 241, "", 0, 65535, False, "Teşhis"),
+    ("reset_brown_out", "Reset — Brown Out", 242, "", 0, 65535, False, "Teşhis"),
+    ("reset_watchdog", "Reset — Watchdog", 243, "", 0, 65535, False, "Teşhis"),
+    ("reset_software", "Reset — Software", 244, "", 0, 65535, False, "Teşhis"),
+    ("reset_mclr", "Reset — MCLR", 245, "", 0, 65535, False, "Teşhis"),
+    ("reset_option_byte", "Reset — Option Byte Loader", 246, "", 0, 65535, False, "Teşhis"),
+    ("reset_v18_power", "Reset — V1.8 Power", 247, "", 0, 65535, False, "Teşhis"),
+]
+
+RELAY_PARAM_INDEX = {p[0]: p for p in RELAY_PARAM_TANIMLARI}
+
+# "index" birimli alanların anlamı (Modbus tablosundaki Table-N açıklamaları).
+# YALNIZCA kaynakta net okunabilen tablolar burada; PDF'te yan yana duran iki
+# tablo metin çıkarımında birbirine karıştığı için emin olunamayanlar bilerek
+# DIŞARIDA bırakıldı -- panel onları ham sayı olarak gösteriyor. Yanlış bir
+# etiket, ham sayıdan daha kötü: kullanıcı ona güvenip ayarı yanlış yorumlar.
+RELAY_PARAM_SECENEKLERI = {
+    "modbus_hizi": {0: "4800 bps", 1: "9600 bps", 2: "19200 bps", 3: "38400 bps"},
+    "jenerator": {0: "Devre Dışı", 1: "Devrede"},
+    "kademe_ortak_kontrol": {0: "Devre Dışı", 1: "Devrede"},
+    "kademeler_daimi_kontrol": {0: "Devre Dışı", 1: "Devrede"},
+    "termik_kontrol": {0: "Devre Dışı", 1: "Devrede"},
+    "es_yaslandirma_kontrol": {0: "Devre Dışı", 1: "Devrede"},
+    "akim_gerilim_eslestirme": {0: "Devre Dışı", 1: "Devrede"},
+    "kurulum_daimi_kontrol": {0: "Devre Dışı", 1: "Devrede"},
+    "erisim_kontrol": {0: "Devre Dışı", 1: "Devrede"},
+    "ekran_koruyucu": {0: "Devre Dışı", 1: "Devrede"},
+    "asiri_gerilim_koruma": {0: "Devre Dışı", 1: "Devrede"},
+    "dusuk_gerilim_koruma": {0: "Devre Dışı", 1: "Devrede"},
+    "asiri_harmonik_koruma": {0: "Devre Dışı", 1: "Devrede"},
+    "asiri_sicaklik_koruma": {0: "Devre Dışı", 1: "Devrede"},
+}
+
+# Rölenin cihaz durumu (Kademeler bloğu, register 40006 -- Table-1).
+RELAY_CIHAZ_DURUMLARI = {
+    0: "Boşta", 1: "Servis Dışı", 2: "Kurulumda",
+    3: "Kompanzasyonda", 4: "Kademe Öğrenmede", 5: "Uygulanamaz",
+}
+
+# Yazma komutları (Modbus tablosu "Komutlar" sayfası, 9000-9041).
+# tetik=None olanlar 0xAA55 yerine kendi değerini alıyor (bkz. PDF).
+RELAY_KOMUTLARI = {
+    "enerjileri_sil": (9001, DEVICE_TRIGGER_VALUE, "Enerjileri Sil", False),
+    "min_max_sil": (9002, DEVICE_TRIGGER_VALUE, "Min/Max Değerleri Sil", False),
+    "demandlari_sil": (9003, DEVICE_TRIGGER_VALUE, "Demandları Sil", False),
+    "alarmlari_sil": (9004, DEVICE_TRIGGER_VALUE, "Tüm Alarmları Sil", False),
+    "rgp_sil": (9005, DEVICE_TRIGGER_VALUE, "RGP Sil", False),
+    "kademe_tanima_akilli": (9007, DEVICE_TRIGGER_VALUE, "Kademe Tanıma Başlat (Akıllı)", False),
+    "kademe_tanima_sirali": (9008, DEVICE_TRIGGER_VALUE, "Kademe Tanıma Başlat (Sıralı)", False),
+    "kademe_tanima_hizli": (9009, DEVICE_TRIGGER_VALUE, "Kademe Tanıma Başlat (Hızlı)", False),
+    "svc_tanima": (9010, DEVICE_TRIGGER_VALUE, "SVC Tanımayı Başlat", False),
+    "kademe_tanima_bitir": (9012, DEVICE_TRIGGER_VALUE, "Kademe Tanımayı Sonlandır", False),
+    "kuruluma_basla": (9013, DEVICE_TRIGGER_VALUE, "Kuruluma Başla", False),
+    "kurulumu_bitir": (9014, DEVICE_TRIGGER_VALUE, "Kurulumu Sonlandır", False),
+    "kademe_sayac_sil": (9015, DEVICE_TRIGGER_VALUE, "Kademe Çekme Sayısı ve Süresini Sil", False),
+    "kademe_detay_sil": (9016, DEVICE_TRIGGER_VALUE, "Kademe Detaylarını Sil", False),
+    "kademe_reset": (9019, DEVICE_TRIGGER_VALUE, "Kademe Reset", False),
+    "olaylari_sil": (9040, DEVICE_TRIGGER_VALUE, "Olayları Sil", False),
+    "uyarilari_sil": (9041, DEVICE_TRIGGER_VALUE, "Uyarıları Sil", False),
+    # Geri dönüşü olmayan / cihazı kesintiye uğratan komutlar. Panelde çift
+    # onay isteniyor (bkz. tehlikeli=True) -- ANL21 planındaki aynı kural.
+    "sifre_sifirla": (9022, DEVICE_TRIGGER_VALUE, "Sistem Şifresini Sıfırla", True),
+    "fabrika_ayarlari": (9024, DEVICE_TRIGGER_VALUE, "Fabrika Ayarlarına Dön", True),
+    "cihaz_reset": (9025, DEVICE_TRIGGER_VALUE, "Cihazı Yeniden Başlat", True),
+}
+
+
+def _relay_cihazi_mi(device_id: str) -> bool:
+    return device_type_from_id(device_id) in RELAY_DEVICE_TYPES
+
+
+@app.get("/relay/tanimlar")
+def relay_tanimlar(user: str = Depends(require_auth)):
+    """Panelin kartları çizmek için ihtiyaç duyduğu statik tanımlar.
+
+    Etiket/birim/aralık bilgisi tek kaynaktan (burası) geliyor; web, iOS ve
+    Android aynı listeyi kullanıyor, üç yerde kopya tutulmuyor."""
+    return {
+        "parametreler": [
+            {"anahtar": p[0], "etiket": p[1], "register": p[2], "birim": p[3],
+             "min": p[4], "max": p[5], "yazilabilir": p[6], "grup": p[7],
+             "secenekler": RELAY_PARAM_SECENEKLERI.get(p[0])}
+            for p in RELAY_PARAM_TANIMLARI
+        ],
+        "komutlar": [
+            {"anahtar": k, "etiket": v[2], "register": v[0], "tehlikeli": v[3]}
+            for k, v in RELAY_KOMUTLARI.items()
+        ],
+        "cihaz_durumlari": RELAY_CIHAZ_DURUMLARI,
+    }
+
+
+@app.get("/relay/snapshots")
+def relay_snapshots(device_id: str, user: str = Depends(require_auth)):
+    """Rölenin tüm kategorilerinin son değerleri (kartların veri kaynağı)."""
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    conn = db_connect()
+    cur = conn.cursor()
+    try:
+        cur.execute(
+            "SELECT kategori, data, updated_at FROM relay_snapshots WHERE device_id = %s",
+            (device_id,),
+        )
+        rows = cur.fetchall()
+    finally:
+        cur.close()
+        conn.close()
+    return {
+        r[0]: {"data": r[1], "updated_at": r[2].isoformat() if r[2] else None}
+        for r in rows
+    }
+
+
+class RelayParamRequest(BaseModel):
+    device_id: str
+    anahtar: str
+    deger: int
+
+
+@app.post("/relay/parametre")
+def relay_parametre_yaz(payload: RelayParamRequest, user: str = Depends(require_auth)):
+    """Röle ayarını değiştirir (Modbus fonksiyon kodu 06, tek register).
+
+    Doğrulama BURADA yapılıyor, panelde değil: panel atlanabilir (doğrudan API
+    çağrısı), cihaza aralık dışı bir ayar yazmak ise kompanzasyonu bozabilir."""
+    device_id = payload.device_id.strip()
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if not _relay_cihazi_mi(device_id):
+        raise HTTPException(status_code=400, detail="Bu cihaz bir reaktif güç kontrol rölesi değil")
+
+    tanim = RELAY_PARAM_INDEX.get(payload.anahtar)
+    if not tanim:
+        raise HTTPException(status_code=400, detail="Bilinmeyen parametre")
+    _, etiket, register, _, alt, ust, yazilabilir, _ = tanim
+    if not yazilabilir:
+        raise HTTPException(status_code=400, detail=f"“{etiket}” salt okunur bir alan")
+    if not (alt <= payload.deger <= ust):
+        raise HTTPException(
+            status_code=400,
+            detail=f"“{etiket}” için geçerli aralık {alt}–{ust}",
+        )
+
+    # Negatif değerler cihazda 16-bit ikiye tümleyen olarak tutuluyor.
+    ham = payload.deger if payload.deger >= 0 else payload.deger + 65536
+    publish_command(device_id, register, ham)
+    audit("relay.parametre", actor=user, entity_type="device", entity_id=device_id,
+          detail={"anahtar": payload.anahtar, "deger": payload.deger, "register": register})
+    return {"message": f"“{etiket}” gönderildi"}
+
+
+class RelayKomutRequest(BaseModel):
+    device_id: str
+    komut: str
+
+
+@app.post("/relay/komut")
+def relay_komut(payload: RelayKomutRequest, user: str = Depends(require_auth)):
+    """Röle komutu çalıştırır (9000 bloğu, tetik değeri 0xAA55)."""
+    device_id = payload.device_id.strip()
+    if not is_device_owner(user, device_id):
+        raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if not _relay_cihazi_mi(device_id):
+        raise HTTPException(status_code=400, detail="Bu cihaz bir reaktif güç kontrol rölesi değil")
+    komut = RELAY_KOMUTLARI.get(payload.komut)
+    if not komut:
+        raise HTTPException(status_code=400, detail="Bilinmeyen komut")
+    register, tetik, etiket, tehlikeli = komut
+    publish_command(device_id, register, tetik)
+    audit("relay.komut", actor=user, entity_type="device", entity_id=device_id,
+          detail={"komut": payload.komut, "register": register, "tehlikeli": tehlikeli})
+    return {"message": f"“{etiket}” gönderildi"}
 
 
 # ---------- Iyzico ödeme ----------
@@ -5796,6 +6127,14 @@ def mqtt_thread():
         client.subscribe(MQTT_HARMONICS_WILDCARD)
         client.subscribe(MQTT_INFO_WILDCARD)
         client.subscribe(MQTT_WIFI_WILDCARD)
+        client.subscribe(MQTT_RELAY_LIVE_WILDCARD)
+        client.subscribe(MQTT_RELAY_STATUS_WILDCARD)
+        client.subscribe(MQTT_RELAY_INFO_WILDCARD)
+        client.subscribe(MQTT_RELAY_KADEMELER_WILDCARD)
+        client.subscribe(MQTT_RELAY_TOPLAM_WILDCARD)
+        client.subscribe(MQTT_RELAY_TEPE_WILDCARD)
+        client.subscribe(MQTT_RELAY_ENERJI_WILDCARD)
+        client.subscribe(MQTT_RELAY_PARAM_WILDCARD)
 
     def handle_status(device_id: str, payload: str):
         status = payload.strip()
@@ -5905,6 +6244,26 @@ def mqtt_thread():
             (device_id, signal_type, *values),
         )
 
+    def handle_relay_snapshot(device_id: str, kategori: str, data: dict):
+        """Röleye özel kategorileri (kademeler, toplam, tepe, enerji,
+        parametreler, live) tek tabloda cihaz+kategori başına ÜZERİNE yazar.
+
+        Geçmiş tutulmuyor: bunlar kartlarda anlık değer olarak gösteriliyor,
+        canlı ölçümün geçmişi zaten measurements tablosunda (bkz. migration
+        dosyasındaki gerekçe)."""
+        cur.execute("""
+            INSERT INTO relay_snapshots (device_id, kategori, data, updated_at)
+            VALUES (%s, %s, %s, now())
+            ON CONFLICT (device_id, kategori) DO UPDATE SET
+                data = EXCLUDED.data, updated_at = now()
+        """, (device_id, kategori, json.dumps(data)))
+        # Panel açıkken kartların beklemeden tazelenmesi için WebSocket'e de it.
+        if main_loop:
+            asyncio.run_coroutine_threadsafe(
+                broadcast({"type": "relay_snapshot", "kategori": kategori, "data": data}, device_id),
+                main_loop,
+            )
+
     def handle_info(device_id: str, data: dict):
         # Cihaz bilgisi statik -- retained mesaj, tek satir/cihaz upsert.
         values = [data.get(k) for k in INFO_COLUMNS]
@@ -5932,6 +6291,9 @@ def mqtt_thread():
                     handle_demand(device_id, subtype, data)
                 elif category == "harmonics":
                     handle_harmonics(device_id, subtype, data)
+                elif category in ("tepe", "enerji"):
+                    # relay/<id>/tepe/tuketim -> kategori "tepe_tuketim"
+                    handle_relay_snapshot(device_id, f"{category}_{subtype}", data)
                 return
 
             device_id = device_id_from_topic(msg.topic)
@@ -5948,6 +6310,18 @@ def mqtt_thread():
             data = json.loads(msg.payload.decode())
             if msg.topic.endswith("/live"):
                 handle_live(device_id, data)
+                # Röle canlı verisinde ölçüm çekirdeğinin DIŞINDA alanlar da var
+                # (SVC durumu, sıcaklık, pil gerilimi, hedef cosφ). measurements
+                # tablosunda bunlara sütun yok, kaybolmasınlar diye görüntü
+                # olarak da saklanıyor.
+                if msg.topic.startswith("relay/"):
+                    handle_relay_snapshot(device_id, "live", data)
+            elif msg.topic.endswith("/kademeler"):
+                handle_relay_snapshot(device_id, "kademeler", data)
+            elif msg.topic.endswith("/toplam"):
+                handle_relay_snapshot(device_id, "toplam", data)
+            elif msg.topic.endswith("/parametreler"):
+                handle_relay_snapshot(device_id, "parametreler", data)
             elif msg.topic.endswith("/energy"):
                 handle_energy(device_id, data)
             elif msg.topic.endswith("/stats"):
