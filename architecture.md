@@ -725,12 +725,12 @@ Her iki uygulamada cihaz listesi başlığında **STAGING rozeti** var. Staging 
 - ~~Cihaz sahipliği modeli (dashboard sadece cihaz sahibine açık, diğerleri "Cihaz Ekle" görür)~~ — **Tamamlandı (15 Ağustos 2026)**, bkz. bölüm 5.2
 - ~~Gerçek çoklu cihaz desteği~~ — **Tamamlandı (18 Ağustos 2026)**, bkz. bölüm 5.4 (MAC tabanlı benzersiz `device_id`, parametrik MQTT topic'leri, kurulum kodu güvenliği)
 - **Mobil uygulama (native iOS/Swift + Android/Kotlin, tam kapsamlı, Tuya benzeri)** — devam ediyor, bkz. bölüm 5.5. Android: tam akış + WiFi kurulumu gerçek cihazda doğrulandı. iOS: temel akış Simulator'de doğrulandı, WiFi kurulumu kod olarak hazır ama gerçek cihaz testi Apple Developer Program üyeliğine bağlı bekliyor. **Her iki platformda da artık pariteli** (19 Ağustos 2026): Reaktif/Görünür/THD + Nötr satırı + saatlik enerji tablosu (web'deki `HourlyEnergyModal` karşılığı), "Ekle" butonu WiFi kurulumu tamamlanmadan aktif olmuyor, özel uygulama ikonu (marka lacivert zemin + "1/0" işareti) ve web ile birebir aynı renk paleti.
-- Enerji tüketimi (kWh) hesaplama, günlük/aylık raporlama
+- ~~Enerji tüketimi (kWh) hesaplama, günlük/aylık raporlama~~ — **Tamamlandı** (bkz. bölüm 5.10 Reaktif Ceza Analizi, 5.12 Fatura Analizi — Üç Zamanlı Tarife, 5.13 Aylık PDF Enerji Raporu). Bu liste maddesi, aşağıdaki 5.9+ bölümleri eklenirken güncellenmemiş — bu bölümün tamamı geriye dönük gözden geçirilip fiilen tamamlanmış maddeler işaretlendi (18 Eylül 2026).
 - ~~ESP32 bağlantı kopması durumunda otomatik yeniden bağlanma~~ — **Tamamlandı (19 Ağustos 2026)**: `.ino`'nun `loop()` fonksiyonu artık her döngüde `WiFi.status()` kontrol ediyor; kopukluk varsa `WiFi.reconnect()` deniyor, **3 dakikadan uzun** süre toparlanamazsa `ESP.restart()` ile kendini yeniden başlatıyor (WiFi yığını bazen sadece tam reboot ile kurtuluyor). Önceden sadece MQTT seviyesinde reconnect vardı, gerçek WiFi kopmaları (15 Ağustos'taki 67 dakikalık kesinti gibi) hiç fark edilmiyordu. **Flaşlanmadı, henüz gerçek donanımda test edilmedi** — kullanıcı müsait olduğunda flaşlayıp doğrulamalı.
 - ~~Geçmiş veriyi CSV/Excel olarak dışa aktarma özelliği~~ — **Tamamlandı (19 Ağustos 2026), sadece web:** `GET /energy/hourly?device_id=...&format=xlsx` (aynı endpoint, `format` parametresiyle JSON yerine gerçek bir `.xlsx` dosyası döndürüyor — `openpyxl` ile üretiliyor, kalın başlık satırı + otomatik sütun genişliği, sayılar metin değil gerçek Excel numarası olarak yazılıyor). İlk denemede düz CSV yapılmıştı, kullanıcı "xlsx olarak indirsin" deyince `openpyxl` (`requirements.txt`'e eklendi) ile gerçek Excel formatına geçirildi. Saatlik Enerji modalına "Excel indir" butonu eklendi (`axios` ile `responseType: 'blob'`, sonra tarayıcıda indirme tetikleniyor). Mobil uygulamalara eklenmedi (istenirse ayrı bir iş).
-- Güvenlik notu: TimescaleDB ve MQTT için şu an aynı şifre kullanılıyor (`.env`'deki `POSTGRES_PASSWORD` ve `MQTT_PASSWORD`) — istenirse ayrıştırılabilir
+- ~~Güvenlik notu: TimescaleDB ve MQTT için şu an aynı şifre kullanılıyor~~ — **Tamamlandı (21 Ağustos 2026)**, bkz. güvenlik hafızası: `POSTGRES_PASSWORD` VPS'te bağımsız bir değere döndürüldü (`MQTT_PASSWORD` kasıtlı olarak dokunulmadı, değiştirmek her fiziksel cihazı yeniden flaşlamayı gerektirirdi).
 - SMS ile doğrulama (şu an sadece e-posta) — ücretli bir SMS sağlayıcı (Netgsm, Twilio vb.) hesabı gerektirir, bilinçli olarak yapılmadı
-- Alarm eşikleri (gerilim/akım anormal değerlerde bildirim — e-posta/Telegram)
+- ~~Alarm eşikleri (gerilim/akım anormal değerlerde bildirim — e-posta/Telegram)~~ — **Tamamlandı**: `api.py`'de tam bir kural motoru var (`ALARM_METRICS`, `evaluate_alarms`, deadband ile flap-önleme, e-posta + web push bildirimi, çevrimdışı izleme watchdog'u). Telegram entegrasyonu yapılmadı (istenirse ayrı bir iş).
 
 ### 5.9 Hesap Sayfası + Profil Fotoğrafı (22 Ağustos 2026)
 
@@ -1152,6 +1152,47 @@ gerekir; öncesinde gerekmez.
 
 Sağlık kontrolü artık **%80 disk / %90 bellek** eşiklerinde uyarıyor — "disk
 doldu, veri toplama durdu" diye öğrenmek en kötü senaryo.
+
+### 5.18 Firmware İndirme Güvenliği — İmzalı URL (18 Eylül 2026)
+
+25 Ağustos'ta yapılan bir güvenlik taramasında bulunup o an düzeltilmeyen bir
+açık kapatıldı: `/firmware-files` bir `StaticFiles` mount'uydu, yani dosya
+adını bilen HERKES (hesapsız) firmware `.bin` dosyasını indirebiliyordu.
+Dosya adı tahmin edilebilir (`f"{device_type}-{version}.bin"`, sürümler küçük
+artan sayılar) ve dosyanın içinde `MQTT_PASSWORD` düz metin gömülü
+(`mqttClient.connect(..., "esp32user", "...", ...)`) — yani bu, bir cihaza
+hiç fiziksel erişmeden broker şifresini ele geçirmenin bir yoluydu.
+
+**Çözüm:** `/firmware-files/{filename}` artık bir HMAC imzası (`sig`) ve son
+kullanma zamanı (`exp`) gerektiriyor — `sign_firmware_url()`/
+`verify_firmware_url()`, mevcut `DEVICE_CLAIM_SECRET` ile imzalanıyor, dosya
+adı imzalanan mesajın içinde (bir dosya için üretilen imza başka bir dosyaya
+karşı tekrar kullanılamaz). İmzalı URL yalnızca zaten auth+sahiplik
+kontrolünden geçen `GET /firmware/{tip}/latest` (15 dk geçerli) ve
+`POST /devices/{id}/ota` (30 dk geçerli — GA1202 OTA deneyiminde görüldüğü
+gibi kararsız bağlantılı cihazlarda indirme birkaç dakika gecikmeli
+başlayabiliyor) tarafından üretiliyor.
+
+Staging'de tek kullanımlık bir admin QA hesabıyla (SQL ile oluşturulup sonra
+silindi) uçtan uca doğrulandı: geçerli imza gerçek dosyayı sha256'sı eşleşerek
+indiriyor; tahrif edilmiş imza, süresi geçmiş imza, başka dosyaya karşı
+imza-tekrarı ve eski parametresiz erişim hepsi reddediliyor (403/422).
+Production'da da eski parametresiz erişimin artık 422 döndüğü doğrulandı.
+`tests/test_firmware.py` eklendi (6 test), paket 151→158 teste çıktı.
+
+**Bu düzeltme sırasında bulunan ayrı bir açık, o da aynı gün kapatıldı:**
+`trigger_ota()` kendi `mqtt.Client`'ını doğrudan açıyor, `publish_command()`
+üzerinden geçmiyor — yani diğer tüm cihaz-yazma komutlarını staging'de
+engelleyen `IS_STAGING` koruması (bölüm 9'daki izolasyon sözleşmesi: staging
+üretimle AYNI mosquitto'yu dinler, okuma paylaşılabilir ama yazma ASLA)
+OTA tetiklemeyi kapsamıyordu. Staging'den "OTA tetikle" denemesi gerçek
+sahadaki bir cihaza firmware indirtebilirdi. `trigger_ota()`'ya da aynı
+`IS_STAGING` kontrolü eklendi (MQTT istemcisi oluşturulmadan önce), yeni bir
+testle (`tests/test_staging.py::test_ota_tetikleme_staging_de_reddedilir`)
+doğrulandı. **Ders:** tek bir yazma-yolu koruması (`publish_command`'daki gibi)
+o kod tabanındaki HER gerçek cihaza yazan fonksiyonu kapsadığı anlamına
+gelmiyor — kendi MQTT istemcisini açan her fonksiyon ayrı ayrı kontrol
+edilmeli.
 
 ---
 

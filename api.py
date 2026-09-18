@@ -21,7 +21,7 @@ import psycopg2
 import resend
 from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -329,12 +329,46 @@ AVATAR_DIR = os.environ.get("AVATAR_DIR", "/app/uploads/avatars")
 os.makedirs(AVATAR_DIR, exist_ok=True)
 app.mount("/avatars", StaticFiles(directory=AVATAR_DIR), name="avatars")
 
-# Firmware .bin dosyalari -- avatarlarla ayni gerekce ile kimlik dogrulamasiz
-# servis ediliyor (ESP32'nin dogrudan indirebilmesi icin, cihazda JWT/login
-# mekanizmasi yok). Yukleme (POST) ise admin-only.
+# Firmware .bin dosyalari -- ESP32'de JWT/login mekanizmasi olmadigi icin normal
+# auth uygulanamiyor, AMA dogrudan StaticFiles mount'u da GUVENSIZ: dosya adi
+# tahmin edilebilir (f"{device_type}-{version}.bin", surumler kucuk artan
+# sayilar) ve firmware'in icinde MQTT broker sifresi duz metin gomulu (bkz.
+# ESP32-*.ino, mqttClient.connect(...)). Herhangi biri /firmware-files/anl21-0.1.0.bin
+# gibi adresi deneyerek hesapsiz firmware indirip broker sifresini cikarabilirdi
+# (2026-08-25 tarihli guvenlik taramasinda bulundu, o zaman duzeltilmedi).
+# Cozum: dosyalar artik dogrudan degil, kisa omurlu imzali URL uzerinden servis
+# ediliyor -- imza (HMAC) ve son kullanma zamani /firmware/latest ve /ota
+# endpoint'leri tarafindan uretiliyor, bu endpoint'ler zaten auth+sahiplik
+# kontrolunden geciyor.
 FIRMWARE_DIR = os.environ.get("FIRMWARE_DIR", "/app/uploads/firmware")
 os.makedirs(FIRMWARE_DIR, exist_ok=True)
-app.mount("/firmware-files", StaticFiles(directory=FIRMWARE_DIR), name="firmware-files")
+
+
+def sign_firmware_url(filename: str, ttl_seconds: int) -> str:
+    exp = int(time.time()) + ttl_seconds
+    sig = hmac.new(DEVICE_CLAIM_SECRET.encode(), f"firmware:{filename}:{exp}".encode(),
+                    hashlib.sha256).hexdigest()
+    return f"{SITE_URL}/api/firmware-files/{filename}?exp={exp}&sig={sig}"
+
+
+def verify_firmware_url(filename: str, exp: int, sig: str) -> bool:
+    if time.time() > exp:
+        return False
+    expected = hmac.new(DEVICE_CLAIM_SECRET.encode(), f"firmware:{filename}:{exp}".encode(),
+                         hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, expected)
+
+
+@app.get("/firmware-files/{filename}")
+def download_firmware(filename: str, exp: int, sig: str):
+    if not re.match(r"^[a-zA-Z0-9_.-]{1,64}$", filename):
+        raise HTTPException(status_code=400, detail="Geçersiz dosya adı")
+    if not verify_firmware_url(filename, exp, sig):
+        raise HTTPException(status_code=403, detail="Bağlantının süresi dolmuş veya geçersiz")
+    path = os.path.join(FIRMWARE_DIR, filename)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Dosya bulunamadı")
+    return FileResponse(path, media_type="application/octet-stream", filename=filename)
 
 # Cihazi bir bagimsiz ariza mi yoksa "hic kurulmamis" mi diye ayirt edebilmek icin
 # esikler: bu sureden uzun sessiz kalan cihaz filo panelinde uyari olarak gosterilir.
@@ -2617,7 +2651,7 @@ def get_latest_firmware(device_type: str, user: str = Depends(require_auth)):
         return None
     return {
         "version": row[0],
-        "url": f"{SITE_URL}/api/firmware-files/{row[1]}",
+        "url": sign_firmware_url(row[1], ttl_seconds=15 * 60),
         "sha256": row[2],
         "uploaded_at": row[3].isoformat(),
     }
@@ -2653,6 +2687,15 @@ def trigger_ota(device_id: str, user: str = Depends(require_auth)):
     audit("device.ota", actor=user, entity_type="device", entity_id=device_id)
     if not is_device_owner(user, device_id):
         raise HTTPException(status_code=403, detail="Bu cihaza erişiminiz yok")
+    if IS_STAGING:
+        # publish_command()'daki AYNI korumanin eksigi: burasi kendi mqtt.Client'ini
+        # acip staging'in de dinledigi GERCEK production broker'ina yayin yapiyordu --
+        # yani staging'den "OTA tetikle" denemesi sahadaki gercek bir cihaza firmware
+        # indirtebilirdi. publish_command'daki staging kilidi bu yolu kapsamiyordu.
+        logger.warning("[STAGING] OTA tetikleme engellendi: %s", device_id)
+        raise HTTPException(
+            status_code=503,
+            detail="Staging ortamından gerçek cihaza OTA tetiklenemez.")
     check_rate_limit(f"ota:{user}", max_attempts=10, window_seconds=60 * 60)
     device_type = device_type_from_id(device_id)
     if not device_type:
@@ -2672,7 +2715,10 @@ def trigger_ota(device_id: str, user: str = Depends(require_auth)):
 
     version, filename, sha256 = row
     payload = json.dumps({
-        "url": f"{SITE_URL}/api/firmware-files/{filename}",
+        # 30 dk: cihaz o an cevrimici olsa da MQTT baglantisi kararsizsa
+        # (bkz. GA1202 OTA deneyimi) indirme hemen degil birkac dakika
+        # gecikmeli baslayabiliyor.
+        "url": sign_firmware_url(filename, ttl_seconds=30 * 60),
         "version": version,
         "sha256": sha256,
     })
