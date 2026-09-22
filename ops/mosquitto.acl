@@ -1,0 +1,39 @@
+# Binary Enerji — MQTT ACL (22 Eylül 2026)
+#
+# 22 Eylül 2026'ya kadar bu dosya hiç yoktu: mosquitto sadece kimlik
+# doğruluyordu (allow_anonymous false + password_file), topic bazlı hiçbir
+# yetkilendirme yoktu -- herhangi bir authenticated client herhangi bir
+# topic'e yazıp okuyabiliyordu. `cut -d: -f1 /etc/mosquitto/passwd` yalnızca
+# iki kullanıcı gösteriyor: esp32user (TÜM fiziksel cihazlar -- ANL13, ANL21,
+# GA1202, hepsi AYNI paylaşılan kimlikle bağlanıyor) ve homeassistant.
+#
+# Bu paylaşılan esp32user şifresi her cihazın firmware'inde düz metin gömülü
+# (mqttClient.connect(..., "esp32user", "...", ...)) ve 18 Eylül 2026'ya
+# kadar bir firmware .bin dosyası indirip bu şifreyi çıkarmak hesapsız
+# mümkündü (bkz. api.py'deki sign_firmware_url/verify_firmware_url fix'i).
+# ACL olmadan bu şifreyi ele geçiren biri BAŞKA BİR MÜŞTERİNİN cihazına sahte
+# telemetri (gerçek alarmları bastırmak/sahte alarm tetiklemek için) veya
+# sahte YAZMA KOMUTU (API'nin sahiplik/şifre-onayı/hız-sınırı korumalarının
+# hepsini bypass ederek, çünkü onlar API'nin kendi yayın yolunu korur,
+# broker'ın kendisini değil) gönderebilirdi.
+#
+# BU İLK AŞAMA CİHAZ-CİHAZA İZOLASYONU SAĞLAMIYOR: esp32user hâlâ geniş
+# erişimli bırakıldı çünkü API'nin kendi broker bağlantısı da AYNI kimliği
+# kullanıyor (passwd dosyasında üçüncü bir kullanıcı yok) -- ikisini birbirinden
+# ayırmadan esp32user'ı kısıtlamak hem API'yi hem TÜM canlı cihaz filosunu
+# aynı anda broker'dan koparır. Bugünkü amaç: (1) ACL mekanizmasını canlı
+# broker'a hatasız/kesintisiz şekilde sokmak, (2) homeassistant hesabını
+# kendi alanına kilitlemek (bu, cihazlarla ilgisiz ve dar kapsamı bilinen
+# tek hesap). Cihaz başına gerçek izolasyon -- her cihaza kendi mosquitto
+# kimliğini vermek (altyapı zaten var: mosquitto_kayit_uygula.sh) ve esp32user
+# yerine "%u" desenli kurallarla (`pattern readwrite powermeter/%u/#` vb.)
+# her cihazı yalnızca kendi topic'ine kilitlemek, API'ye de ayrı bir
+# yönetici kimliği açmak -- fiziksel/WiFi erişimi olan her cihaz tek tek bu
+# yeni kimliğe geçirildikten SONRA yapılacak ikinci aşama. Bkz. proje güvenlik
+# notları (memory: project-power-dashboard-security-notes, madde 5).
+
+user esp32user
+topic readwrite #
+
+user homeassistant
+topic readwrite homeassistant/#

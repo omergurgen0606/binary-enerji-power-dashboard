@@ -15,6 +15,19 @@ services:
       # mosquitto_passwd araciyla, konteyner icinden guncelliyor. ro iken
       # "Read-only file system" hatasiyla basarisiz oluyordu.
       - /etc/mosquitto/passwd:/etc/mosquitto/passwd
+      # ro: ACL dosyasi sadece config'den okunuyor, mosquitto_passwd gibi
+      # konteyner-ici bir arac tarafindan yazilmiyor -- passwd'nin aksine
+      # read-only kalabilir. 22 Eylul 2026: broker'in o zamana kadar HICBIR
+      # topic bazli kisitlamasi yoktu (sadece kimlik dogrulama vardi), yani
+      # esp32user sifresini ele geciren biri BASKA BIR MUSTERININ cihazina
+      # sahte veri veya sahte komut yazabilirdi. Bu ilk asama cihaz-cihaza
+      # izolasyonu SAGLAMIYOR (esp32user hala genis erisimli -- API de ayni
+      # kimligi paylasiyor, hepsini ayirmadan kesemeyiz); sadece ACL
+      # mekanizmasini canliya guvenle sokuyor ve homeassistant hesabini
+      # kendi alanina kilitliyor. Cihaz basina gercek izolasyon (per-cihaz
+      # mosquitto kimligi + %u desenli kural), fiziksel/WiFi erisimi olan
+      # her cihaz tek tek yeni kimlige gecirildikten sonra ikinci asamada.
+      - /etc/mosquitto/acl:/etc/mosquitto/acl:ro
       # TLS sertifikalari. Bu baglama olmadan mosquitto sertifikayi bulamaz,
       # acilista hata verip CIKAR ve broker cokme dongusune girer -- yani
       # eksikligi sessiz degil, tam kesinti demek.
