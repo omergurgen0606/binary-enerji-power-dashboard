@@ -1194,6 +1194,58 @@ o kod tabanındaki HER gerçek cihaza yazan fonksiyonu kapsadığı anlamına
 gelmiyor — kendi MQTT istemcisini açan her fonksiyon ayrı ayrı kontrol
 edilmeli.
 
+### 5.19 MQTT ACL — Aşama 1 (22 Eylül 2026)
+
+`/firmware-files` düzeltmesi sırasında akla gelen bir soru araştırıldı: madem
+`esp32user` şifresi firmware'de gömülüydü ve indirilebiliyordu, broker bu
+şifreyi ele geçiren birinin BAŞKA bir müşterinin cihazına yazmasını
+engelliyor muydu? Sunucuda `/etc/mosquitto/conf.d/default.conf` ve
+`/etc/mosquitto/passwd` doğrudan okundu (kullanıcı kendi terminalinde
+çalıştırıp çıktıyı yapıştırdı — Claude'un VPS'e SSH ile doğrudan okuma
+yapması harness tarafından engelleniyor). Sonuç beklenenden kötüydü:
+
+- **Hiç `acl_file` yoktu.** Broker sadece kimlik doğruluyordu, topic bazlı
+  hiçbir yetkilendirme yoktu.
+- **`esp32user` TEK kimlik olarak TÜM cihazlarda** (ANL13, ANL21, GA1202)
+  paylaşılıyordu (`homeassistant` dışında başka kullanıcı yoktu). Cihaz
+  başına ayrı kimlik altyapısı (`ops/mosquitto_kayit_uygula.sh`) hiç fiilen
+  kullanılmamış.
+
+Bu, "cihaz X'in verisini taklit etme" riskinin ötesinde, `esp32user`
+şifresini ele geçiren birinin **herhangi bir cihazın `cmd` topic'ine sahte
+yazma komutu göndererek API'nin tüm sahiplik/şifre-onayı/hız-sınırı
+korumalarını bypass edebileceği** ve **kendi sha256'sını kendi belirlediği
+sahte bir OTA payload'ıyla kötü niyetli firmware'e yönlendirebileceği**
+anlamına geliyordu.
+
+Kullanıcıyla birlikte, riski kabul ederek CANLI broker'a aynı gün ilk aşama
+uygulandı: `ops/mosquitto.acl` (yeni dosya) + `ops/mosquitto.conf`'a
+`acl_file` satırı + `docker-compose.yml`'e eşleşen salt-okunur mount.
+`esp32user` bilerek `topic readwrite #` (değişmedi) bırakıldı — API'nin kendi
+broker bağlantısı da aynı kimliği kullandığı için (üçüncü bir hesap yok),
+onu kısıtlamak API'yi ve TÜM canlı filoyu aynı anda broker'dan koparırdı.
+`homeassistant` ise `homeassistant/#`'e kilitlendi. Amaç bugün cihaz-cihaza
+izolasyon sağlamak değil, ACL mekanizmasını canlıya hatasız sokmak ve
+ilgisiz tek hesabı (homeassistant) daraltmaktı.
+
+Dosyalar sunucudaki gerçek yollara (`/etc/mosquitto/acl`,
+`/etc/mosquitto/conf.d/default.conf`) kopyalanıp `docker compose up -d
+mosquitto` ile yeniden başlatıldı. İlk denemede zararsız bir izin uyarısı
+çıktı (dosya `mosquitto` kullanıcısına ait değildi) — `chown 1883:1883` +
+`chmod 700` ile giderildi (aynı `/etc/mosquitto/passwd` deseninde), ikinci
+restart temiz geçti. Canlıda doğrulandı: gerçek bir cihaz (`anl21-8085d8`)
+ve `homeassistant` yeniden bağlanıp TLS negotiate etti, `root-api-1`
+loglarında hata yok, `/health` yeşil kaldı.
+
+**Aşama 2 (henüz yapılmadı, fiziksel erişime bağlı):** gerçek cihaz-başına
+izolasyon için her fiziksel cihazın kendi mosquitto kimliğine geçirilmesi
+gerekiyor (ANL13 üniteleri, `anl21-8085d8`, enrollment öncesi kurulan diğer
+cihazlar) — bu, zaten bilinen GA1202 OTA/register doğrulama işiyle AYNI
+fiziksel/WiFi-reset erişimi blokajına takılıyor. Cihazlar tek tek
+geçirildikten sonra `esp32user`'ın `#` kuralı `pattern readwrite
+powermeter/%u/#` gibi cihaz-başına desenlerle değiştirilecek ve API'ye ayrı
+bir yönetici kimliği açılacak.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026
