@@ -1246,6 +1246,30 @@ geçirildikten sonra `esp32user`'ın `#` kuralı `pattern readwrite
 powermeter/%u/#` gibi cihaz-başına desenlerle değiştirilecek ve API'ye ayrı
 bir yönetici kimliği açılacak.
 
+### 5.20 Geçersiz Ölçüm İşaretlerinin Süzülmesi (30 Eylül 2026)
+
+ANL21'in Fatura sekmesindeki Demand tablosunda "Görünür Güç 1/2/3" satırları
+min ve max için **-1610612736 VA** gösteriyordu. Bu sayı 0xA0000000'ın işaretli
+32-bit karşılığı: analizör bu register'lar için gerçek değer yerine sabit bir
+geçersiz-ölçüm işareti döndürüyor (demand'de her okumada, tepe/harmonik alt
+okumalarında ara sıra). Firmware'deki `readHoldingRegistersRetry` bu imzayı
+yalnızca bloğun **ilk** register'ında kontrol ettiği için bloğun ortasındaki
+alanlar süzülmeden geçiyordu.
+
+**Düzeltme backend'de** (`gecersiz_olcum_mu`, `gecersizleri_temizle`,
+`_temiz_satir` — `api.py`): 0xA0000000, INT32_MIN ve INT32_MAX işaretleri
+firmware'in ölçeklerinden (×1, ×0.1, ×0.01, ×0.001) bağımsız olarak, float32
+yuvarlamasına dayanıklı göreli toleransla (1e-6) tanınıp `null`'a çevriliyor.
+Hem yazarken (stats/peaks/demand/harmonics MQTT işleyicileri) hem okurken
+(`/stats`, `/peaks`, `/demand`, `/harmonics`) uygulanıyor, yani düzeltmeden
+önce yazılmış satırlar da temiz dönüyor — veritabanı göçü gerekmedi. Web,
+iOS ve Android bu alanları zaten opsiyonel tutup `null`'ı "—" olarak
+gösterdiği için istemci değişikliği gerekmedi; firmware'e OTA da gerekmedi.
+
+`tests/test_gecersiz_olcum.py` (24 test, float32 yuvarlamasını birebir taklit
+ediyor), paket 182 teste çıktı. Staging → production dağıtıldı; canlı panelde
+satırların "— VA" gösterdiği ve diğer değerlerin değişmediği doğrulandı.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026

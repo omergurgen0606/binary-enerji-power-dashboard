@@ -3591,6 +3591,47 @@ STATS_JSON_KEYS = [
     "avgVoltageLN", "avgVoltageLL", "avgFrequency", "avgThid", "avgThvd",
 ]
 
+# Analizör, geçersiz ya da desteklemediği bir ölçüm için gerçek değer yerine
+# sabit bir 32-bit işaret döndürüyor. ANL21'de "Görünür Güç demand"
+# register'ları her okumada 0xA0000000 veriyor; tepe/harmonik alt okumalarında
+# da ara sıra görülüyor. Firmware'in tekrar-deneme koruması yalnızca bloğun
+# İLK register'ına bakıyor, bloğun ortasındaki alanlar bu yüzden süzülmeden
+# geçiyor ve panelde -1610612736 VA gibi ham sayılar görünüyordu.
+#
+# Firmware değeri ölçekleyip (×1, ×0.1, ×0.01, ×0.001) float olarak
+# yayınladığı için işaret ölçek bilinmeden geri tanınmalı. float32 yuvarlaması
+# (ör. ×0.1'de ~16'lık adım) yüzünden tam eşitlik yerine göreli tolerans var;
+# 1e-6, gerçek bir ölçümün bu değerlere denk gelmesini fiziksel olarak
+# imkânsız kılacak kadar dar.
+_GECERSIZ_HAM_ISARETLER = (
+    -0x60000000,   # 0xA0000000 (işaretli okununca)
+    -0x80000000,   # 0x80000000 -- INT32_MIN
+    0x7FFFFFFF,    # INT32_MAX
+)
+_FIRMWARE_OLCEKLERI = (1, 0.1, 0.01, 0.001)
+
+
+def gecersiz_olcum_mu(v) -> bool:
+    if isinstance(v, bool) or not isinstance(v, (int, float)):
+        return False
+    if v != v or v in (float("inf"), float("-inf")):
+        return True
+    for olcek in _FIRMWARE_OLCEKLERI:
+        ham = v / olcek
+        if any(abs(ham - isaret) <= abs(isaret) * 1e-6 for isaret in _GECERSIZ_HAM_ISARETLER):
+            return True
+    return False
+
+
+def gecersizleri_temizle(degerler):
+    return [None if gecersiz_olcum_mu(v) else v for v in degerler]
+
+
+def _temiz_satir(satir: dict) -> dict:
+    # Okurken de temizleniyor: düzeltmeden önce yazılmış satırlar da dahil.
+    return {k: (None if gecersiz_olcum_mu(v) else v) for k, v in satir.items()}
+
+
 @app.get("/stats")
 def get_stats(device_id: str, user: str = Depends(require_subscription)):
     if not is_device_owner(user, device_id):
@@ -3606,7 +3647,7 @@ def get_stats(device_id: str, user: str = Depends(require_subscription)):
     conn.close()
     if not row:
         return None
-    return dict(zip(["time"] + STATS_COLUMNS, row))
+    return _temiz_satir(dict(zip(["time"] + STATS_COLUMNS, row)))
 
 # ---------- REST: Tepe (Min/Max) Değerleri (ANL21) ----------
 PEAKS_COLUMNS = [
@@ -3647,7 +3688,7 @@ def get_peaks(device_id: str, user: str = Depends(require_subscription)):
     cur.close()
     conn.close()
     columns = ["direction", "time"] + PEAKS_COLUMNS
-    return {r[0]: dict(zip(columns, r)) for r in rows}
+    return {r[0]: _temiz_satir(dict(zip(columns, r))) for r in rows}
 
 # ---------- REST: Demand Değerleri (ANL21) ----------
 DEMAND_COLUMNS = [
@@ -3684,7 +3725,7 @@ def get_demand(device_id: str, user: str = Depends(require_subscription)):
     cur.close()
     conn.close()
     columns = ["direction", "time"] + DEMAND_COLUMNS
-    return {r[0]: dict(zip(columns, r)) for r in rows}
+    return {r[0]: _temiz_satir(dict(zip(columns, r))) for r in rows}
 
 # ---------- REST: Harmonik Spektrumu (ANL21) ----------
 HARMONICS_ORDERS = list(range(3, 32, 2))  # 3,5,...,31
@@ -3706,7 +3747,7 @@ def get_harmonics(device_id: str, user: str = Depends(require_subscription)):
     cur.close()
     conn.close()
     columns = ["signal_type", "time"] + HARMONICS_COLUMNS
-    return {r[0]: dict(zip(columns, r)) for r in rows}
+    return {r[0]: _temiz_satir(dict(zip(columns, r))) for r in rows}
 
 # ---------- REST: Cihaz Bilgileri (ANL21, statik) ----------
 INFO_COLUMNS = [
@@ -6261,7 +6302,7 @@ def mqtt_thread():
                   data.get("fw_version")))
 
     def handle_stats(device_id: str, data: dict):
-        values = [data.get(k) for k in STATS_JSON_KEYS]
+        values = gecersizleri_temizle([data.get(k) for k in STATS_JSON_KEYS])
         placeholders = ", ".join(["%s"] * len(STATS_COLUMNS))
         cur.execute(
             f"INSERT INTO device_stats (device_id, {', '.join(STATS_COLUMNS)}) VALUES (%s, {placeholders})",
@@ -6269,7 +6310,7 @@ def mqtt_thread():
         )
 
     def handle_peaks(device_id: str, direction: str, data: dict):
-        values = [data.get(k) for k in PEAKS_JSON_KEYS]
+        values = gecersizleri_temizle([data.get(k) for k in PEAKS_JSON_KEYS])
         placeholders = ", ".join(["%s"] * len(PEAKS_COLUMNS))
         cur.execute(
             f"INSERT INTO device_peaks (device_id, direction, {', '.join(PEAKS_COLUMNS)}) VALUES (%s, %s, {placeholders})",
@@ -6277,7 +6318,7 @@ def mqtt_thread():
         )
 
     def handle_demand(device_id: str, direction: str, data: dict):
-        values = [data.get(k) for k in DEMAND_JSON_KEYS]
+        values = gecersizleri_temizle([data.get(k) for k in DEMAND_JSON_KEYS])
         placeholders = ", ".join(["%s"] * len(DEMAND_COLUMNS))
         cur.execute(
             f"INSERT INTO device_demand (device_id, direction, {', '.join(DEMAND_COLUMNS)}) VALUES (%s, %s, {placeholders})",
@@ -6286,7 +6327,7 @@ def mqtt_thread():
 
     def handle_harmonics(device_id: str, signal_type: str, data: dict):
         # Harmonik JSON alan adlari (thd1, h3_l1, ...) DB sutun adlariyla birebir ayni.
-        values = [data.get(k) for k in HARMONICS_COLUMNS]
+        values = gecersizleri_temizle([data.get(k) for k in HARMONICS_COLUMNS])
         placeholders = ", ".join(["%s"] * len(HARMONICS_COLUMNS))
         cur.execute(
             f"INSERT INTO device_harmonics (device_id, signal_type, {', '.join(HARMONICS_COLUMNS)}) VALUES (%s, %s, {placeholders})",
