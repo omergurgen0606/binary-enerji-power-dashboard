@@ -1270,6 +1270,37 @@ gösterdiği için istemci değişikliği gerekmedi; firmware'e OTA da gerekmedi
 ediyor), paket 182 teste çıktı. Staging → production dağıtıldı; canlı panelde
 satırların "— VA" gösterdiği ve diğer değerlerin değişmediği doğrulandı.
 
+### 5.21 Röle Tehlikeli Komutlarına Sunucu Tarafı Şifre Kontrolü (30 Eylül 2026)
+
+**Gerileme:** 21 Ağustos'ta analizörlerin yüksek riskli komutlarına (fabrika
+ayarları, şifre sıfırlama) sunucu tarafında hesap şifresi doğrulaması ve
+5/saat hız sınırı eklenmişti. Eylül'de eklenen röle uç noktası
+(`POST /relay/komut`) bu kontrolü devralmadı: "Fabrika Ayarlarına Dön",
+"Cihazı Yeniden Başlat" ve "Sistem Şifresini Sıfırla" yalnızca sahiplik
+kontrolüyle çalışıyordu. Arayüzdeki "cihaz ID'sini yaz" onayı sadece
+istemcideydi; 30 gün geçerli, iptal edilemeyen bir token'la API'ye doğrudan
+istek atan biri onu atlayabiliyordu. Bulgu, makale yazılırken koddan
+doğrulanırken ortaya çıktı.
+
+**Düzeltme:** Kontrol `yuksek_riskli_komut_sifresi_dogrula(user, password)`
+adlı tek bir fonksiyona çıkarıldı; analizör (`send_device_command`) ve röle
+(`relay_komut`) uç noktaları artık bunu ortak kullanıyor. Asıl sorun kontrolün
+iki yerde ayrı ayrı yazılmasıydı, yeni cihaz tipi eklenince kopyası unutuldu.
+Hız sınırı anahtarı (`highrisk:{user}`) da ortak, yani iki cihaz tipi
+üzerinden ayrı ayrı şifre denemesi yapılamıyor. Web'deki röle onay paneline
+şifre alanı eklendi; buton cihaz ID'si ve şifre birlikte girilmeden aktif
+olmuyor, yanlış şifrede panel açık kalıyor. Mobil uygulamalarda henüz röle
+ekranı yok, o yüzden mobil tarafta değişiklik gerekmedi.
+
+**Testler** (`tests/test_relay.py`, +9): şifresiz / boş / yanlış şifreyle
+tehlikeli komutun cihaza ULAŞMADIĞI, doğru şifreyle gittiği, normal komutun
+şifre istemediği, 5 denemeden sonra doğru şifrenin bile 429 aldığı, hız
+sınırının iki cihaz tipinde ortak olduğu, tablodaki HER tehlikeli komutun
+korunduğu ve analizör yolunun ortak fonksiyona taşındıktan sonra da aynı
+davrandığı. Paket 191 teste çıktı. Staging → production (API + web)
+dağıtıldı; canlı arayüzde onay panelinde şifre alanının göründüğü ve şifresiz
+butonun kilitli kaldığı doğrulandı. Hiçbir komut gönderilmedi.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026

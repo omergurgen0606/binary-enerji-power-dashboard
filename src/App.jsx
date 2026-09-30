@@ -5469,23 +5469,30 @@ function RelayKomutlar({ token, deviceId, tanimlar }) {
   const [mesaj, setMesaj] = useState(null);
   const [onayBekleyen, setOnayBekleyen] = useState(null);
   const [onayMetni, setOnayMetni] = useState('');
+  const [sifre, setSifre] = useState('');
 
   async function calistir(komut) {
     setCalisan(komut.anahtar);
     setMesaj(null);
+    const govde = { device_id: deviceId, komut: komut.anahtar };
+    if (komut.tehlikeli) govde.password = sifre;
     try {
-      const res = await axios.post(`${API_BASE}/relay/komut`,
-        { device_id: deviceId, komut: komut.anahtar },
+      const res = await axios.post(`${API_BASE}/relay/komut`, govde,
         { headers: { Authorization: `Bearer ${token}` } });
       setMesaj({ metin: res.data.message });
+      setOnayBekleyen(null);
+      setOnayMetni('');
     } catch (err) {
+      // Onay paneli açık kalıyor: yanlış şifrede kullanıcı yalnızca şifreyi
+      // düzeltip tekrar denesin, cihaz ID'sini baştan yazmasın.
       setMesaj({ hata: true, metin: err.response?.data?.detail || 'Komut gönderilemedi' });
     } finally {
       setCalisan(null);
-      setOnayBekleyen(null);
-      setOnayMetni('');
+      setSifre('');
     }
   }
+
+  const onayHazir = onayMetni.trim() === deviceId && sifre.length > 0 && !calisan;
 
   const normal = tanimlar.komutlar.filter((k) => !k.tehlikeli);
   const tehlikeli = tanimlar.komutlar.filter((k) => k.tehlikeli);
@@ -5510,7 +5517,7 @@ function RelayKomutlar({ token, deviceId, tanimlar }) {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {tehlikeli.map((k) => (
-            <button key={k.anahtar} onClick={() => { setOnayBekleyen(k); setOnayMetni(''); setMesaj(null); }} style={{
+            <button key={k.anahtar} onClick={() => { setOnayBekleyen(k); setOnayMetni(''); setSifre(''); setMesaj(null); }} style={{
               padding: '8px 12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--danger)',
               background: 'none', color: 'var(--danger)', fontSize: 12, fontWeight: 600, cursor: 'pointer',
             }}>
@@ -5525,27 +5532,38 @@ function RelayKomutlar({ token, deviceId, tanimlar }) {
           }}>
             <div style={{ fontSize: 13, marginBottom: 8 }}>
               <strong>{onayBekleyen.etiket}</strong> — bu işlem geri alınamaz ve cihazın
-              çalışmasını kesintiye uğratabilir. Onaylamak için cihaz ID’sini yazın:
-              <span className="mono" style={{ marginLeft: 4 }}>{deviceId}</span>
+              çalışmasını kesintiye uğratabilir. Onaylamak için cihaz ID’sini
+              (<span className="mono">{deviceId}</span>) ve hesap şifrenizi yazın.
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <input
                 value={onayMetni}
                 onChange={(e) => setOnayMetni(e.target.value)}
                 placeholder={deviceId}
+                aria-label="Cihaz ID"
+                style={{ ...inputStyle, padding: '7px 9px', fontSize: 13, maxWidth: 220 }}
+              />
+              <input
+                type="password"
+                value={sifre}
+                onChange={(e) => setSifre(e.target.value)}
+                placeholder="Hesap şifreniz"
+                aria-label="Hesap şifreniz"
+                autoComplete="current-password"
+                onKeyDown={(e) => { if (e.key === 'Enter' && onayHazir) calistir(onayBekleyen); }}
                 style={{ ...inputStyle, padding: '7px 9px', fontSize: 13, maxWidth: 220 }}
               />
               <button
                 onClick={() => calistir(onayBekleyen)}
-                disabled={onayMetni.trim() !== deviceId || calisan}
+                disabled={!onayHazir}
                 style={{
                   padding: '7px 12px', borderRadius: 'var(--radius-sm)', border: 'none',
-                  background: onayMetni.trim() === deviceId ? 'var(--danger)' : 'var(--border)',
+                  background: onayHazir ? 'var(--danger)' : 'var(--border)',
                   color: '#fff', fontSize: 12, fontWeight: 600,
-                  cursor: onayMetni.trim() === deviceId ? 'pointer' : 'default',
+                  cursor: onayHazir ? 'pointer' : 'default',
                 }}
-              >Onayla ve Çalıştır</button>
-              <button onClick={() => setOnayBekleyen(null)} style={{
+              >{calisan ? 'Gönderiliyor…' : 'Onayla ve Çalıştır'}</button>
+              <button onClick={() => { setOnayBekleyen(null); setSifre(''); }} style={{
                 padding: '7px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)',
                 background: 'none', color: 'var(--muted)', fontSize: 12, cursor: 'pointer',
               }}>Vazgeç</button>

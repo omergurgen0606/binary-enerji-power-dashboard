@@ -2117,6 +2117,7 @@ def relay_parametre_yaz(payload: RelayParamRequest, user: str = Depends(require_
 class RelayKomutRequest(BaseModel):
     device_id: str
     komut: str
+    password: str | None = None  # yalnızca tehlikeli komutlarda zorunlu
 
 
 @app.post("/relay/komut")
@@ -2131,6 +2132,8 @@ def relay_komut(payload: RelayKomutRequest, user: str = Depends(require_auth)):
     if not komut:
         raise HTTPException(status_code=400, detail="Bilinmeyen komut")
     register, tetik, etiket, tehlikeli = komut
+    if tehlikeli:
+        yuksek_riskli_komut_sifresi_dogrula(user, payload.password)
     publish_command(device_id, register, tetik)
     audit("relay.komut", actor=user, entity_type="device", entity_id=device_id,
           detail={"komut": payload.komut, "register": register, "tehlikeli": tehlikeli})
@@ -3773,6 +3776,27 @@ def get_info(device_id: str, user: str = Depends(require_subscription)):
     return dict(zip(INFO_COLUMNS + ["updated_at"], row))
 
 # ---------- REST: Cihaza yazma komutu gönder ----------
+def yuksek_riskli_komut_sifresi_dogrula(user: str, password: str | None):
+    """Geri alınamaz bir cihaz komutundan önce hesap şifresini sunucuda doğrular.
+
+    JWT 30 gün geçerli ve iptal edilemiyor: sızmış bir token tek başına bir
+    cihazı fabrika ayarlarına döndürememeli. Arayüzdeki "cihaz ID'sini yaz"
+    onayı yalnızca istemcide -- asıl koruma bu. Analizör ve röle komut uç
+    noktaları bunu ORTAK kullanıyor; röle uç noktası sonradan eklendiğinde bu
+    kontrolün kopyası unutulmuştu. Hız sınırı anahtarı da ortak: bir kullanıcının
+    iki cihaz tipi üzerinden ayrı ayrı şifre denemesi yapamaması için.
+    """
+    check_rate_limit(f"highrisk:{user}", max_attempts=5, window_seconds=60 * 60)
+    conn = db_connect()
+    cur = conn.cursor()
+    cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not password or not row or not bcrypt.checkpw(password.encode(), row[0].encode()):
+        raise HTTPException(status_code=403, detail="Bu işlem için hesap şifrenizi doğru girmelisiniz")
+
+
 class DeviceCommandRequest(BaseModel):
     command: str
     password: str | None = None  # sadece "risk": "high" komutlar için zorunlu
@@ -3888,15 +3912,7 @@ def send_device_command(device_id: str, payload: DeviceCommandRequest, user: str
     # mekanizması yok, bu da çalınan/sızan bir token'ın tek başına factory_reset/
     # reset_password çalıştırmasını engelliyor (bkz. architecture.md güvenlik notları).
     if cmd["risk"] == "high":
-        check_rate_limit(f"highrisk:{user}", max_attempts=5, window_seconds=60 * 60)
-        conn = db_connect()
-        cur = conn.cursor()
-        cur.execute("SELECT password_hash FROM users WHERE username = %s", (user,))
-        row = cur.fetchone()
-        cur.close()
-        conn.close()
-        if not payload.password or not row or not bcrypt.checkpw(payload.password.encode(), row[0].encode()):
-            raise HTTPException(status_code=403, detail="Bu işlem için hesap şifrenizi doğru girmelisiniz")
+        yuksek_riskli_komut_sifresi_dogrula(user, payload.password)
     try:
         publish_command(device_id, cmd["register"], cmd["value"])
     except Exception as e:

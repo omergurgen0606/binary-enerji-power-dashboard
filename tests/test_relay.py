@@ -118,6 +118,92 @@ def test_bilinmeyen_komut_reddedilir(role_cihazi, gonderilen):
     assert gonderilen == []
 
 
+@pytest.fixture
+def gercek_sifre(db, monkeypatch):
+    """roleci'ye gerçek bir bcrypt hash'i ver; hız sınırı durumunu temiz başlat."""
+    import bcrypt
+    h = bcrypt.hashpw(b"dogru-sifre", bcrypt.gensalt(rounds=4)).decode()
+    db.execute("UPDATE users SET password_hash = %s WHERE username = 'roleci'", (h,))
+    monkeypatch.setattr(api, "_rate_limit_state", {})
+    return "dogru-sifre"
+
+
+@pytest.mark.parametrize("sifre", [None, "", "yanlis-sifre"])
+def test_tehlikeli_komut_sifresiz_cihaza_ULASMAZ(role_cihazi, gonderilen, gercek_sifre, sifre):
+    """Arayüzdeki "cihaz ID'sini yaz" onayı yalnızca istemcide; sızmış bir
+    token'la API'ye doğrudan istek atan biri onu atlar. Sunucu şifre istemeli."""
+    istek = api.RelayKomutRequest(device_id="ga1202-aabbcc", komut="fabrika_ayarlari", password=sifre)
+    with pytest.raises(HTTPException) as e:
+        api.relay_komut(istek, user="roleci")
+    assert e.value.status_code == 403
+    assert gonderilen == []
+
+
+def test_tehlikeli_komut_dogru_sifreyle_gider(role_cihazi, gonderilen, gercek_sifre):
+    istek = api.RelayKomutRequest(device_id="ga1202-aabbcc", komut="fabrika_ayarlari", password=gercek_sifre)
+    api.relay_komut(istek, user="roleci")
+    register = api.RELAY_KOMUTLARI["fabrika_ayarlari"][0]
+    assert gonderilen == [("ga1202-aabbcc", register, api.DEVICE_TRIGGER_VALUE)]
+
+
+def test_normal_komut_sifre_istemez(role_cihazi, gonderilen, gercek_sifre):
+    istek = api.RelayKomutRequest(device_id="ga1202-aabbcc", komut="min_max_sil")
+    api.relay_komut(istek, user="roleci")
+    assert len(gonderilen) == 1
+
+
+def test_tehlikeli_komut_sifre_denemesi_hiz_sinirli(role_cihazi, gonderilen, gercek_sifre):
+    """Şifre bu uç noktadan tahmin edilemesin: saatte 5 deneme, sonra 429 --
+    doğru şifre gelse bile."""
+    for _ in range(5):
+        with pytest.raises(HTTPException):
+            api.relay_komut(api.RelayKomutRequest(
+                device_id="ga1202-aabbcc", komut="cihaz_reset", password="yanlis"), user="roleci")
+    with pytest.raises(HTTPException) as e:
+        api.relay_komut(api.RelayKomutRequest(
+            device_id="ga1202-aabbcc", komut="cihaz_reset", password=gercek_sifre), user="roleci")
+    assert e.value.status_code == 429
+    assert gonderilen == []
+
+
+def test_hiz_siniri_iki_cihaz_tipinde_ortak(role_cihazi, gonderilen, gercek_sifre):
+    """Analizör ve röle aynı şifre-deneme bütçesini paylaşmalı; yoksa her cihaz
+    tipi saldırgana ayrı bir 5 denemelik hak verirdi."""
+    for _ in range(5):
+        with pytest.raises(HTTPException):
+            api.yuksek_riskli_komut_sifresi_dogrula("roleci", "yanlis")
+    with pytest.raises(HTTPException) as e:
+        api.relay_komut(api.RelayKomutRequest(
+            device_id="ga1202-aabbcc", komut="sifre_sifirla", password=gercek_sifre), user="roleci")
+    assert e.value.status_code == 429
+
+
+def test_tum_tehlikeli_komutlar_sunucuda_korunuyor(role_cihazi, gonderilen, gercek_sifre):
+    """Tabloya ileride eklenecek her tehlikeli komut da otomatik korunmalı."""
+    tehlikeliler = [k for k, v in api.RELAY_KOMUTLARI.items() if v[3]]
+    assert tehlikeliler, "tehlikeli komut listesi boş olmamalı"
+    for k in tehlikeliler:
+        with pytest.raises(HTTPException) as e:
+            api.relay_komut(api.RelayKomutRequest(device_id="ga1202-aabbcc", komut=k), user="roleci")
+        assert e.value.status_code == 403
+    assert gonderilen == []
+
+
+def test_analizor_yuksek_riskli_komutu_da_ayni_korumada(role_cihazi, gonderilen, gercek_sifre):
+    """Analizör uç noktası da ortak doğrulamayı kullanıyor -- şifresiz geçmez,
+    doğru şifreyle gider, düşük riskli komut şifre istemez."""
+    with pytest.raises(HTTPException) as e:
+        api.send_device_command("anl21-112233", api.DeviceCommandRequest(command="factory_reset"), user="roleci")
+    assert e.value.status_code == 403
+    assert gonderilen == []
+
+    api.send_device_command("anl21-112233",
+                            api.DeviceCommandRequest(command="factory_reset", password=gercek_sifre), user="roleci")
+    api.send_device_command("anl21-112233", api.DeviceCommandRequest(command="reset_demand"), user="roleci")
+    assert [g[1] for g in gonderilen] == [api.DEVICE_COMMANDS["factory_reset"]["register"],
+                                          api.DEVICE_COMMANDS["reset_demand"]["register"]]
+
+
 def test_tehlikeli_komutlar_isaretli():
     """Panel bu bayrağa bakıp çift onay istiyor; bayrak düşerse onay da düşer."""
     for anahtar in ("fabrika_ayarlari", "cihaz_reset", "sifre_sifirla"):
