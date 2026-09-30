@@ -37,3 +37,7 @@ topic readwrite #
 
 user homeassistant
 topic readwrite homeassistant/#
+# Ev otomasyonu MQTT entity'leri powermeter/{device_id}/{live,energy} altını
+# dinliyor (bkz. memory: project-home-assistant) -- salt-okunur, bu hesap
+# hiçbir cihaza yazmıyor/komut göndermiyor.
+topic read powermeter/#
