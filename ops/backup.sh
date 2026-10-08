@@ -51,22 +51,43 @@ Sunucuya bağlanıp kontrol edin: ssh binaryenerji, sonra 'cat /root/backups/bac
   exit 1
 }
 
-docker compose exec -T timescaledb pg_dump -U postgres postgres 2>/dev/null | gzip > "$DB_FILE"
-if [ ! -s "$DB_FILE" ]; then
-  fail "pg_dump başarısız veya boş çıktı verdi"
-fi
+# Dosya boyutuna bakmak YETMİYOR: pg_dump hiç çalışmasa bile gzip ~20 baytlık
+# geçerli bir dosya üretir ve eski "-s" kontrolü bunu başarılı yedek sayıyordu
+# (Ekim 2026 Contabo taşınmasında bulundu -- olmayan binarysarj veritabanı her
+# gece "başarıyla" yedekleniyor görünecekti). Artık pipe'ın çıkış kodu
+# (pipefail ile pg_dump'ınki) ve dosyanın gerçekten bir dump olduğu kontrol
+# ediliyor. İçerik kontrolü pipefail'siz bir alt kabukta: head erken kapanınca
+# gzip SIGPIPE alır ve pipefail eşleşmiş bir grep'i bile başarısız sayardı.
+dump_al() {  # $1 = veritabanı, $2 = hedef dosya
+  docker compose exec -T timescaledb pg_dump -U postgres "$1" 2>>"$BACKUP_DIR/backup.log" | gzip > "$2" \
+    && ( set +o pipefail; gzip -dc "$2" | head -c 4096 | grep -q "PostgreSQL database dump" )
+}
 
-docker compose exec -T timescaledb pg_dump -U postgres binarysarj 2>/dev/null | gzip > "$SARJ_DB_FILE"
-if [ ! -s "$SARJ_DB_FILE" ]; then
-  fail "binarysarj pg_dump başarısız veya boş çıktı verdi"
+dump_al postgres "$DB_FILE" || fail "pg_dump başarısız veya geçersiz çıktı (postgres)"
+
+# Binary Şarj aynı Postgres sürecinde ayrı bir veritabanı. Sunucuda kurulu
+# değilse atlanıyor ve logda açıkça "yok" yazıyor: "yok" ile "yedeklenemedi"
+# farklı şeyler -- ilki hata e-postası üretmemeli, ikincisi üretmeli.
+SARJ_VAR=$(docker compose exec -T timescaledb psql -U postgres -tAc \
+  "SELECT 1 FROM pg_database WHERE datname='binarysarj'" 2>/dev/null | tr -d '[:space:]')
+if [ "$SARJ_VAR" = "1" ]; then
+  dump_al binarysarj "$SARJ_DB_FILE" || fail "pg_dump başarısız veya geçersiz çıktı (binarysarj)"
+else
+  SARJ_DB_FILE=""
 fi
 
 if ! docker run --rm -v root_avatar_uploads:/data -v "$BACKUP_DIR":/backup alpine tar czf "/backup/uploads_${DATE}.tar.gz" -C /data . 2>/dev/null; then
   fail "uploads (avatar/firmware) yedeği başarısız"
 fi
 
-if ! docker run --rm -v binarysarj_sarj_media:/data -v "$BACKUP_DIR":/backup alpine tar czf "/backup/sarj_media_${DATE}.tar.gz" -C /data . 2>/dev/null; then
-  fail "binarysarj istasyon fotoğrafları yedeği başarısız"
+# "docker run -v ad:/data" olmayan bir birimi sessizce BOŞ olarak oluşturur;
+# önce var olduğu doğrulanıyor, yoksa boş bir arşiv yedek sanılmasın.
+if docker volume inspect binarysarj_sarj_media >/dev/null 2>&1; then
+  if ! docker run --rm -v binarysarj_sarj_media:/data -v "$BACKUP_DIR":/backup alpine tar czf "/backup/sarj_media_${DATE}.tar.gz" -C /data . 2>/dev/null; then
+    fail "binarysarj istasyon fotoğrafları yedeği başarısız"
+  fi
+else
+  SARJ_MEDIA_FILE=""
 fi
 
 # 14 günden eski yedekleri temizle
@@ -75,7 +96,7 @@ find "$BACKUP_DIR" -name "uploads_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
 find "$BACKUP_DIR" -name "sarj_media_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
 
 DB_SIZE=$(du -h "$DB_FILE" | cut -f1)
-SARJ_DB_SIZE=$(du -h "$SARJ_DB_FILE" | cut -f1)
+SARJ_DB_SIZE=$([ -n "$SARJ_DB_FILE" ] && du -h "$SARJ_DB_FILE" | cut -f1 || echo "yok")
 UP_SIZE=$(du -h "$UPLOADS_FILE" 2>/dev/null | cut -f1)
-SARJ_MEDIA_SIZE=$(du -h "$SARJ_MEDIA_FILE" 2>/dev/null | cut -f1)
+SARJ_MEDIA_SIZE=$([ -n "$SARJ_MEDIA_FILE" ] && du -h "$SARJ_MEDIA_FILE" 2>/dev/null | cut -f1 || echo "yok")
 echo "$(date -Iseconds) BACKUP OK: db=${DB_SIZE} binarysarj=${SARJ_DB_SIZE} uploads=${UP_SIZE} sarj_media=${SARJ_MEDIA_SIZE}" >> "$BACKUP_DIR/backup.log"

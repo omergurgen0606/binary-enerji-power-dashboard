@@ -1,15 +1,25 @@
 # Operasyon betikleri
 
-VPS'te (`/root/`) çalışan, `crontab -l` ile kurulu otomatik görevler. Buradaki kopyalar
-sadece dokümantasyon/versiyon kontrolü içindir — asıl çalışan kopyalar VPS'in kendisinde.
+VPS'te (Contabo, 109.205.182.142 — Ekim 2026'dan beri) `/root/ops/` altında duran,
+`crontab -l` ile kurulu otomatik görevler. Sunucu, kullanıcının başka bir projesiyle
+PAYLAŞILIYOR: sunucuyu yeniden kurmayın, Nginx'i
+yeniden yüklemeden önce `nginx -t` çalıştırın. Binary Şarj da aynı sunucuda
+(`/root/binarysarj`, kurulum: Şarj deposundaki `infra/yeniden-kurulum.sh`).
 
 ## Kurulu cron görevleri
 
+Zamanlar sunucu saatiyle (Europe/Berlin).
+
 ```
-0 3 * * *     /root/backup.sh                  # her gün 03:00 — DB + uploads yedeği
-*/15 * * * *  /root/healthcheck.sh              # her 15 dakikada bir — site erişilebilirlik kontrolü
-0 8 * * 1     /root/backup_weekly_report.sh     # her Pazartesi 08:00 — haftalık durum e-postası
+0 3 * * *     /root/ops/backup.sh                    # her gün 03:00 — DB + uploads yedeği
+*/15 * * * *  /root/ops/healthcheck.sh               # 15 dakikada bir — site erişilebilirlik kontrolü
+0 8 * * 1     /root/ops/backup_weekly_report.sh      # her Pazartesi 08:00 — haftalık durum e-postası
+*/3 * * * *   /root/ops/mosquitto_kayit_uygula.sh    # 3 dakikada bir — cihaz-başına MQTT kimliklerini broker'a uygular
+0 6 1 * *     /root/ops/monthly_report.sh            # her ayın 1'i 06:00 — aylık PDF enerji raporları
 ```
+
+Ayrıca certbot yenileme kancası: `/etc/letsencrypt/renewal-hooks/deploy/binaryenerji-mosquitto.sh`
+yalnızca binaryenerji.com sertifikası yenilenince `mosquitto_sertifika_senkron.sh`'yi çalıştırır.
 
 ## backup.sh
 

@@ -38,7 +38,12 @@ services:
       - power_net
 
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
+    # Sürüm SABİT: "latest" bir yeniden kurulumda sessizce daha yeni bir
+    # TimescaleDB çeker ve düz SQL yedeğini (pg_dump) geri yüklemek, yedeğin
+    # alındığı uzantı sürümünü ister. Ekim 2026 Contabo taşınmasında yedek
+    # 2.29.1 ile alınmıştı. Yükseltme bilinçli yapılmalı: imajı değiştir,
+    # ardından ALTER EXTENSION timescaledb UPDATE.
+    image: timescale/timescaledb:2.29.1-pg16
     restart: unless-stopped
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}

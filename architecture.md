@@ -1301,6 +1301,57 @@ davrandığı. Paket 191 teste çıktı. Staging → production (API + web)
 dağıtıldı; canlı arayüzde onay panelinde şifre alanının göründüğü ve şifresiz
 butonun kilitli kaldığı doğrulandı. Hiçbir komut gönderilmedi.
 
+### 5.22 Sunucu Kaybı ve Contabo'ya Taşınma (5–9 Ekim 2026)
+
+**Ne oldu:** DigitalOcean aboneliği yenilenmediği için droplet (138.68.83.111)
+silindi ve IP başka bir müşteriye geçti. Sunucudaki günlük yedekler
+(`/root/backups`) sunucuyla birlikte gitti; sunucu dışındaki tek kopya
+kullanıcının Mac'indeki **28 Ağustos** yedeğiydi. 28 Ağustos – 5 Ekim arası
+ölçümler, o tarihten sonra eklenen cihazlar (GA1202 rölesi) ve hesaplar,
+Binary Şarj'ın tüm verisi kayboldu.
+
+**Acil adım — sarkan DNS:** binaryenerji.com hâlâ eski IP'yi gösteriyordu,
+yani alan adı artık bir yabancının sunucusunu işaret ediyordu (o sunucu
+binaryenerji.com için geçerli sertifika bile alabilirdi). A kayıtları hemen
+silindi. Not: o sırada "eski IP'de MQTT portları açık" sanıldı; bu, Mac'in
+ağının her TCP bağlantısını "açık" göstermesinden kaynaklanan yanlış ölçümdü
+(1.1.1.1'in rastgele bir portu bile açık çıkıyordu). Yeni sunucudan ölçünce
+1883/8883 kapalıydı — cihazlar oraya bağlanamadı, broker şifresi bu olayda
+sızmadı. **Ders: dış port kontrolü Mac'ten değil, sunucudan yapılmalı.**
+
+**Yeni sunucu:** Contabo, 109.205.182.142, Ubuntu 24.04, 4 çekirdek / 7,8 GB /
+96 GB. Kullanıcının başka bir projesiyle
+**paylaşılıyor** — yeniden kurulum yapılmamalı, Nginx değişikliği öncesi
+`nginx -t`. Kurulum: 2 GB swap, ufw'ye 8883 ve 8443, TimescaleDB
+**2.29.1-pg16'ya sabitlendi** (düz SQL yedeği, alındığı uzantı sürümünü
+istiyor; `latest` sessizce daha yenisini çekerdi), yedek
+`timescaledb_pre_restore()` → geri yükleme → `timescaledb_post_restore()` ile
+hatasız yüklendi (her tablonun satır sayısı yedekle birebir aynı), sonra 18
+şema göçü uygulandı ve sonuç `00-baseline.sql` ile sütun düzeyinde
+karşılaştırıldı (423/423). Mosquitto şifre/ACL dosyası yeniden kuruldu, Let's
+Encrypt sertifikası alındı, certbot yenileme kancası yalnızca binaryenerji.com
+sertifikası yenilenince broker sertifikasını güncelliyor. Cron görevleri
+`ops/README.md`'de.
+
+**Yedekleme betiğinde bulunan hata:** `pg_dump | gzip > dosya` sonrası yalnızca
+"dosya boş değil mi" kontrolü vardı; pg_dump hiç çalışmasa bile gzip ~20
+baytlık geçerli bir dosya üretiyor ve bu başarılı yedek sayılıyordu (Şarj
+veritabanı olmayan yeni sunucuda her gece sahte bir Şarj yedeği oluşacaktı).
+Artık pipe'ın çıkış kodu ve dosyanın gerçek bir dump olduğu kontrol ediliyor;
+Şarj veritabanı/birimi yoksa logda açıkça "yok" yazıyor.
+
+**Binary Şarj'ın ayrılması (8–9 Ekim 2026):** Şarj başka bir oturumda aynı
+sunucuya yeniden kuruldu (`/root/binarysarj`, aynı Postgres'te `binarysarj`
+veritabanı, `/sarj/` Nginx yönlendirmesi — `ops/nginx-uretim.conf`'a eklenen
+`include snippets/binarysarj.conf` satırı bu yüzden) ve kendi bağımsız
+iOS/Android uygulamalarına ayrıldı. Binary Enerji tarafında web'deki
+Enerji/Şarj seçim sayfası (`HomeHub`) kaldırıldı; giriş sonrası doğrudan
+Cihazlarım açılıyor. `/sso/binary-sarj` backend'de kaldı: Şarj
+uygulamalarındaki "Binary Enerji hesabıyla giriş" onu kullanıyor.
+
+**Kalan dersi:** Sunucu dışı otomatik yedek hâlâ yok (`ops/backup_offsite.sh`
+hazır ama bir bulut depolama hesabı gerektiriyor). Bu olayın asıl sebebi buydu.
+
 ---
 
 **Doküman oluşturulma tarihi:** 13 Ağustos 2026

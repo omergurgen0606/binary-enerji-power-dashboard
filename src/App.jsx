@@ -2433,16 +2433,13 @@ function DeviceGroups({ devices, onSelect }) {
   );
 }
 
-function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, onOpenOrganization, isAdmin, token, onDeviceAdded, subscription, onBackToHub }) {
+function DeviceList({ devices, onSelect, onLogout, onOpenAccount, onOpenFleet, onOpenOrganization, isAdmin, token, onDeviceAdded, subscription }) {
   const [showAddForm, setShowAddForm] = useState(devices.length === 0);
 
   return (
     <div className="centered-page" style={{ maxWidth: 420, padding: '0 24px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: -8 }}>
-        <button onClick={onBackToHub} style={{
-          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
-          cursor: 'pointer', padding: 4,
-        }}>← Binary Enerji</button>
+        <span style={{ color: 'var(--muted)', fontSize: 12, padding: 4 }}>Binary Enerji</span>
         <div style={{ display: 'flex', gap: 12 }}>
           {isAdmin && (
             <button onClick={onOpenFleet} style={{
@@ -6145,122 +6142,6 @@ function TermsOfService() {
 // yerine siteden tamamen çıkıyordu. Artık URL tek doğruluk kaynağı: geri/ileri
 // kendiliğinden çalışıyor, sayfa yenilenince bulunduğunuz yer korunuyor ve
 // bir cihazın bağlantısı paylaşılabiliyor.
-// Binary Enerji artik iki urunun ortak girisi: enerji izleme (Cihazlarim) ve
-// elektrikli arac sarj agi (Binary Sarj). Giristen sonra kullanici once burada
-// hangi urune gidecegini seciyor.
-function HomeHub({ deviceCount, token, onOpenDevices, onOpenAccount, onLogout }) {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-
-  async function openBinarySarj() {
-    setBusy(true);
-    setError(null);
-    try {
-      const res = await axios.post(`${API_BASE}/sso/binary-sarj`, {}, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      // Devir bileti URL fragment'inda tasiniyor. Fragment sunucuya hic
-      // gonderilmez -- boylece bilet ne erisim loglarina ne de bir sonraki
-      // isteğin Referer basligina duser.
-      window.location.href = `${res.data.url}#bilet=${encodeURIComponent(res.data.handoff_token)}`;
-    } catch (err) {
-      setError(err.response?.status === 503
-        ? 'Binary Şarj bağlantısı bu ortamda henüz etkin değil.'
-        : 'Binary Şarj açılamadı. Lütfen tekrar deneyin.');
-      setBusy(false);
-    }
-  }
-
-  const kart = {
-    background: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: 'var(--radius-lg)',
-    boxShadow: 'var(--shadow-card)',
-    padding: 24,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10,
-    cursor: 'pointer',
-    textAlign: 'left',
-    font: 'inherit',
-    color: 'inherit',
-    width: '100%',
-  };
-
-  return (
-    <div className="centered-page" style={{ maxWidth: 720, padding: '0 24px' }}>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12, marginBottom: -8 }}>
-        <button onClick={onOpenAccount} style={{
-          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
-          cursor: 'pointer', padding: 4, textDecoration: 'underline',
-        }}>Hesabım</button>
-        <button onClick={onLogout} style={{
-          background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12,
-          cursor: 'pointer', padding: 4, textDecoration: 'underline',
-        }}>Çıkış</button>
-      </div>
-
-      <h1 style={{
-        margin: '0 0 6px', fontFamily: 'var(--font-display)', fontSize: 22,
-        fontWeight: 700, textAlign: 'center',
-      }}>Binary Enerji</h1>
-      <p style={{ margin: '0 0 24px', textAlign: 'center', color: 'var(--muted)', fontSize: 14 }}>
-        Hangi ürünle devam etmek istersiniz?
-      </p>
-
-      <div style={{
-        display: 'grid', gap: 14,
-        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-      }}>
-        <button type="button" onClick={onOpenDevices} style={kart}>
-          <span style={{ fontSize: 30, lineHeight: 1 }}>📟</span>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700 }}>
-            Cihazlarım
-          </span>
-          <span style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>
-            Enerji ölçerlerinizin canlı verisi, tüketim geçmişi, alarmlar ve raporlar.
-          </span>
-          <span style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 600, marginTop: 4 }}>
-            {deviceCount === 0
-              ? 'Henüz cihaz eklenmemiş →'
-              : `${deviceCount} cihaz →`}
-          </span>
-        </button>
-
-        <button type="button" onClick={openBinarySarj} disabled={busy} style={{
-          ...kart,
-          opacity: busy ? 0.6 : 1,
-          cursor: busy ? 'progress' : 'pointer',
-        }}>
-          <span style={{ fontSize: 30, lineHeight: 1 }}>⚡</span>
-          <span style={{ fontFamily: 'var(--font-display)', fontSize: 18, fontWeight: 700 }}>
-            Binary Şarj
-          </span>
-          <span style={{ fontSize: 13.5, color: 'var(--muted)', lineHeight: 1.6 }}>
-            Elektrikli araç şarj ağı: istasyon haritası, rota planlayıcı, şarj geçmişi
-            ve evdeki şarjınız.
-          </span>
-          <span style={{ fontSize: 12.5, color: 'var(--accent)', fontWeight: 600, marginTop: 4 }}>
-            {busy ? 'Açılıyor…' : 'Şarj ağına git →'}
-          </span>
-        </button>
-      </div>
-
-      {error && (
-        <div style={{
-          marginTop: 14, fontSize: 13, color: 'var(--danger)',
-          background: 'var(--surface)', border: '1px solid var(--danger)',
-          borderRadius: 'var(--radius-md)', padding: 12, lineHeight: 1.6,
-        }}>{error}</div>
-      )}
-
-      <p style={{ marginTop: 22, textAlign: 'center', color: 'var(--muted)', fontSize: 12 }}>
-        Tek hesap, iki ürün — Binary Şarj'a geçerken tekrar giriş yapmanız gerekmez.
-      </p>
-    </div>
-  );
-}
-
 
 function parseRoute(pathname) {
   if (pathname === '/odeme') return { ad: 'odeme' };
@@ -6283,8 +6164,11 @@ function parseRoute(pathname) {
         ? eslesme[2] : 'canli',
     };
   }
-  // Bilinmeyen yollar ve kok yol ortak girise duser.
-  return { ad: 'hub' };
+  // Kök yol ve bilinmeyen yollar cihaz listesine düşer. (Ekim 2026'ya kadar
+  // burada Binary Enerji / Binary Şarj seçim sayfası vardı; Şarj kendi
+  // uygulamalarına ayrılınca kaldırıldı. /sso/binary-sarj backend'de duruyor:
+  // Şarj uygulamalarındaki "Binary Enerji hesabıyla giriş" onu kullanıyor.)
+  return { ad: 'liste' };
 }
 
 function useRoute() {
@@ -6393,20 +6277,6 @@ export default function App() {
     return null;
   }
 
-  if (route.ad === 'hub') {
-    return (
-      <>
-        <HomeHub
-          deviceCount={devices?.length ?? 0}
-          token={token}
-          onOpenDevices={() => navigate('/cihazlar')}
-          onOpenAccount={() => navigate('/hesabim')}
-          onLogout={handleLogout}
-        />
-        <Footer />
-      </>
-    );
-  }
 
   // Filo, organizasyon ve cihaz panelinden "geri", ortak girise degil cihaz
   // listesine doner -- kullanici oraya listeden gelmisti.
@@ -6461,7 +6331,6 @@ export default function App() {
   return (
     <>
       <DeviceList
-        onBackToHub={() => navigate('/')}
         devices={devices}
         onSelect={(device) => {
           let sonSekme = 'canli';
