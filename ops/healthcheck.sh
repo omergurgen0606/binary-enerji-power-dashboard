@@ -63,6 +63,32 @@ Sunucu: ssh binaryenerji — 'df -h', 'free -m', 'docker stats --no-stream'"
 
 check_resources
 
+# --- MQTT broker ---
+# Site ayaktayken broker kapalı olabilir: 18 Ekim 2026'daki yeniden başlatmadan
+# hemen önce mosquitto konteyneri elle durdurulmuş sayıldı (docker
+# "hasBeenManuallyStopped"), "unless-stopped" onu geri getirmedi ve cihazlar 3
+# gün boyunca veri gönderemedi -- web sitesi kontrolü bunu hiç görmedi. Broker
+# kapalıysa burada başlatılıyor ve bir kez haber veriliyor.
+MQTT_STATE="/root/backups/.mqtt_state"
+check_broker() {
+  local prev
+  prev=$(cat "$MQTT_STATE" 2>/dev/null || echo "ok")
+  if [ "$(docker inspect -f '{{.State.Running}}' root-mosquitto-1 2>/dev/null)" = "true" ]; then
+    [ "$prev" != "ok" ] && send_alert "✅ Binary Enerji: MQTT broker tekrar çalışıyor" "Cihaz bağlantıları yeniden kabul ediliyor ($(date -Iseconds))."
+    echo "ok" > "$MQTT_STATE"
+    return
+  fi
+  docker compose up -d mosquitto >/dev/null 2>&1
+  if [ "$prev" = "ok" ]; then
+    send_alert "⚠️ Binary Enerji: MQTT broker kapalıydı" "mosquitto konteyneri çalışmıyordu; cihazlar bu sürede veri gönderemedi. Otomatik olarak yeniden başlatıldı ($(date -Iseconds)).
+
+Kontrol: ssh binaryenerji, sonra 'docker compose ps mosquitto' ve 'docker compose logs mosquitto --tail 50'"
+    echo "uyarildi" > "$MQTT_STATE"
+  fi
+}
+
+check_broker
+
 HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$URL")
 PREV_FAILS=$(cat "$STATE_FILE" 2>/dev/null || echo 0)
 

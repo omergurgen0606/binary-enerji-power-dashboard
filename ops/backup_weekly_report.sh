@@ -23,11 +23,28 @@ LATEST_SARJ_DB=$(ls -t "$BACKUP_DIR"/db_binarysarj_*.sql.gz 2>/dev/null | head -
 LATEST_SARJ_SIZE=$(du -h "$LATEST_SARJ_DB" 2>/dev/null | cut -f1)
 DISK_FREE=$(df -h / | awk 'NR==2{print $4}')
 
+# Sunucu dışı kopya: Mac, yedekleri her çektiğinde bu dosyayı güncelliyor
+# (ops/yedek_mac_cek.sh). Sunucu Mac'e kendisi ulaşamadığı için, Mac'in uzun
+# süre kapalı kalmasını fark etmenin tek yolu bu. Ekim 2026'daki veri kaybı tam
+# olarak "sunucu dışında güncel kopya yok" durumundan doğdu.
+SON_MAC=$(cat "$BACKUP_DIR/.son_mac_cekimi" 2>/dev/null)
+if [ -z "$SON_MAC" ]; then
+  MAC_DURUM="⚠️ Mac henüz hiç yedek çekmedi — sunucu dışında güncel kopya YOK."
+else
+  MAC_GUN=$(( ( $(date +%s) - $(date -d "$SON_MAC" +%s 2>/dev/null || date +%s) ) / 86400 ))
+  if [ "$MAC_GUN" -ge 3 ]; then
+    MAC_DURUM="⚠️ Mac en son ${MAC_GUN} gün önce yedek çekti (${SON_MAC}) — sunucu dışındaki kopya eskiyor. Mac'i açıp internete bağlayın."
+  else
+    MAC_DURUM="Mac'e son çekim: ${SON_MAC} (sunucu dışı kopya güncel)"
+  fi
+fi
+
 BODY="Son 7 gün: ${OK_COUNT} başarılı, ${FAIL_COUNT} başarısız yedekleme.
 
 Son yedek (power-dashboard): $(basename "$LATEST_DB" 2>/dev/null) (${LATEST_SIZE})
 Son yedek (binarysarj): $(basename "$LATEST_SARJ_DB" 2>/dev/null) (${LATEST_SARJ_SIZE})
 Disk boşta: ${DISK_FREE}
+${MAC_DURUM}
 
 Bu bir haftalık otomatik durum e-postasıdır — her hafta gelmesi beklenir. Gelmemesi cron'un durduğunu gösterir.
 
@@ -35,7 +52,7 @@ Bu bir haftalık otomatik durum e-postasıdır — her hafta gelmesi beklenir. G
 $LAST7"
 
 python3 -c "import json,sys; print(json.dumps({'from':'Binary Enerji <no-reply@binaryenerji.com>','to':[sys.argv[1]],'subject':sys.argv[2],'text':sys.argv[3]}))" \
-  "$ALERT_EMAIL" "📋 Binary Enerji: Haftalık yedekleme durumu (${OK_COUNT} başarılı, ${FAIL_COUNT} hata)" "$BODY" > /tmp/_report_payload.json
+  "$ALERT_EMAIL" "📋 Binary Enerji: Haftalık yedekleme durumu (${OK_COUNT} başarılı, ${FAIL_COUNT} hata)$(case "$MAC_DURUM" in ⚠️*) echo " — sunucu dışı kopya eski";; esac)" "$BODY" > /tmp/_report_payload.json
 
 curl -s -X POST 'https://api.resend.com/emails' \
   -H "Authorization: Bearer ${resend_key}" \

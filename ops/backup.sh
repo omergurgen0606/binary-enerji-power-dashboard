@@ -90,13 +90,36 @@ else
   SARJ_MEDIA_FILE=""
 fi
 
+# Ayar arşivi: veritabanı kadar kritik. Ekim 2026'da sunucu kaybolduğunda en
+# zor kurtarılan şey veri değil bunlardı -- özellikle DEVICE_CLAIM_SECRET:
+# cihaz etiketlerine basılı kurulum kodları ondan türetiliyor, kaybolsaydı
+# sahadaki her etiket geçersiz olurdu. Elde yalnızca bir aylık bir kopya vardı.
+# Gizli değerler içerdiği için 600 izniyle yazılıyor; Mac'e de öyle çekiliyor.
+CONFIG_FILE="$BACKUP_DIR/config_${DATE}.tar.gz"
+CONFIG_TMP=$(mktemp -d)
+crontab -l > "$CONFIG_TMP/crontab.txt" 2>/dev/null || true
+CONFIG_LISTE=""
+for f in /root/.env /root/google-service-account.json \
+         /etc/mosquitto/passwd /etc/mosquitto/acl /etc/mosquitto/conf.d/default.conf \
+         /etc/nginx/sites-available/binaryenerji /etc/nginx/sites-available/dashboard-staging \
+         /etc/nginx/snippets/binarysarj.conf \
+         /etc/letsencrypt/renewal-hooks/deploy/binaryenerji-mosquitto.sh; do
+  [ -e "$f" ] && CONFIG_LISTE="$CONFIG_LISTE ${f#/}"
+done
+( umask 077; tar czf "$CONFIG_FILE" -C / $CONFIG_LISTE -C "$CONFIG_TMP" crontab.txt ) 2>/dev/null
+rm -rf "$CONFIG_TMP"
+tar tzf "$CONFIG_FILE" 2>/dev/null | grep -qx "root/.env" \
+  || fail "ayar arşivi oluşturulamadı ya da .env içermiyor"
+
 # 14 günden eski yedekleri temizle
 find "$BACKUP_DIR" -name "db_*.sql.gz" -mtime +${RETENTION_DAYS} -delete
 find "$BACKUP_DIR" -name "uploads_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
 find "$BACKUP_DIR" -name "sarj_media_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
+find "$BACKUP_DIR" -name "config_*.tar.gz" -mtime +${RETENTION_DAYS} -delete
 
 DB_SIZE=$(du -h "$DB_FILE" | cut -f1)
 SARJ_DB_SIZE=$([ -n "$SARJ_DB_FILE" ] && du -h "$SARJ_DB_FILE" | cut -f1 || echo "yok")
 UP_SIZE=$(du -h "$UPLOADS_FILE" 2>/dev/null | cut -f1)
 SARJ_MEDIA_SIZE=$([ -n "$SARJ_MEDIA_FILE" ] && du -h "$SARJ_MEDIA_FILE" 2>/dev/null | cut -f1 || echo "yok")
-echo "$(date -Iseconds) BACKUP OK: db=${DB_SIZE} binarysarj=${SARJ_DB_SIZE} uploads=${UP_SIZE} sarj_media=${SARJ_MEDIA_SIZE}" >> "$BACKUP_DIR/backup.log"
+CONFIG_SIZE=$(du -h "$CONFIG_FILE" | cut -f1)
+echo "$(date -Iseconds) BACKUP OK: db=${DB_SIZE} binarysarj=${SARJ_DB_SIZE} uploads=${UP_SIZE} sarj_media=${SARJ_MEDIA_SIZE} config=${CONFIG_SIZE}" >> "$BACKUP_DIR/backup.log"

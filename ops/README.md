@@ -11,8 +11,8 @@ yeniden yüklemeden önce `nginx -t` çalıştırın. Binary Şarj da aynı sunu
 Zamanlar sunucu saatiyle (Europe/Berlin).
 
 ```
-0 3 * * *     /root/ops/backup.sh                    # her gün 03:00 — DB + uploads yedeği
-*/15 * * * *  /root/ops/healthcheck.sh               # 15 dakikada bir — site erişilebilirlik kontrolü
+0 3 * * *     /root/ops/backup.sh                    # her gün 03:00 — DB + dosya + ayar yedeği
+*/15 * * * *  /root/ops/healthcheck.sh               # 15 dakikada bir — site, broker, disk/bellek kontrolü
 0 8 * * 1     /root/ops/backup_weekly_report.sh      # her Pazartesi 08:00 — haftalık durum e-postası
 */3 * * * *   /root/ops/mosquitto_kayit_uygula.sh    # 3 dakikada bir — cihaz-başına MQTT kimliklerini broker'a uygular
 0 6 1 * *     /root/ops/monthly_report.sh            # her ayın 1'i 06:00 — aylık PDF enerji raporları
@@ -23,16 +23,30 @@ yalnızca binaryenerji.com sertifikası yenilenince `mosquitto_sertifika_senkron
 
 ## backup.sh
 
-- `timescaledb` konteynerinden `pg_dump` alır, gzip'ler, `/root/backups/db_TARIH.sql.gz` olarak kaydeder.
-- `root_avatar_uploads` Docker volume'unu (avatar + firmware dosyaları) tar+gzip'ler.
+- `timescaledb` konteynerinden iki `pg_dump` alır: Binary Enerji (`postgres`) ve Binary Şarj
+  (`binarysarj`, kuruluysa). Her dökümün gerçekten bir PostgreSQL dökümü olduğu doğrulanır.
+- `root_avatar_uploads` (avatar + firmware) ve `binarysarj_sarj_media` (istasyon fotoğrafları)
+  Docker birimlerini tar+gzip'ler.
+- **Ayar arşivi** `config_TARIH.tar.gz` (izin 600): `/root/.env`, Mosquitto parola/ACL/ayar,
+  Nginx site dosyaları, certbot kancası ve crontab. GİZLİ değerler içerir.
 - 14 günden eski yedekleri siler.
 - Herhangi bir adım başarısız olursa Resend üzerinden uyarı e-postası gönderir.
 - Log: `/root/backups/backup.log`
 
-**Not:** Yedekler şu an sadece VPS'in kendi diskinde tutuluyor — VPS'in tamamı kaybolursa
-(disk arızası, hesap silinmesi vb.) bu yedekler de kaybolur. Gerçek felaket kurtarma için
-yedeklerin ayrıca VPS dışına (S3/Backblaze/e-posta vb.) kopyalanması gerekir — bu henüz
-yapılmadı, bir sonraki adım olarak düşünülebilir.
+## Sunucu dışı kopya (Mac)
+
+Sunucu Mac'e ulaşamadığı için kopyayı Mac çeker: `ops/yedek_mac_kur.sh` bir launchd görevi
+(`com.binaryenerji.yedek-cek`) kurar. Bu görev 3 saatte bir ve her oturum açılışında
+`ops/yedek_mac_cek.sh`'yi çalıştırır.
+
+- Hedef `~/Desktop/BinaryEnerji-Yedekler/otomatik`; klasörün izni 700, dosyalarınki 600.
+- Mac'te 30 gün tutulur.
+- Gelen her dosya doğrulanır (gzip bütünlüğü, döküm başlığı, arşivde `.env`). Sorun olursa
+  macOS bildirimi gelir.
+- Çekim günlüğü: aynı klasörde `cekim.log`.
+- Her başarılı çekim sunucuya `/root/backups/.son_mac_cekimi` yazar. Mac 3 gündür çekmediyse
+  haftalık yedek e-postası uyarır.
+- Mac kapalıyken kopya güncellenmez; Mac açılınca ilk çekim hemen yapılır.
 
 ## healthcheck.sh
 
@@ -40,6 +54,8 @@ yapılmadı, bir sonraki adım olarak düşünülebilir.
 - Art arda 2 başarısız denemeden sonra uyarı e-postası gönderir (tek seferlik kesintilerde
   gereksiz alarm vermemek için).
 - Site düzelince "tekrar çalışıyor" e-postası gönderir.
+- MQTT broker (`root-mosquitto-1`) çalışmıyorsa başlatır ve bir kez e-posta gönderir.
+  Durum dosyası: `/root/backups/.mqtt_state`.
 - Durum: `/root/backups/.health_state`
 
 **Sınırlama:** Bu betik VPS'in KENDİSİNDE çalışıyor — VPS tamamen çökerse (elektrik kesintisi,
